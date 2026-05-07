@@ -295,279 +295,328 @@ if __name__ == "__main__":
     
     # 导入中国政府网爬虫
     try:
-        import gov_crawler
+        from Ministries import gov_crawler
         manager.register_crawler("中国政府网", gov_crawler.run, gov_crawler)
     except ImportError as e:
         print(f"⚠️  导入中国政府网爬虫失败: {e}")
     
     # 导入中国政府网政策解读爬虫
     try:
-        import gov_interpretation_crawler
+        from Ministries import gov_interpretation_crawler
         manager.register_crawler("中国政府网政策解读", gov_interpretation_crawler.run, gov_interpretation_crawler)
     except ImportError as e:
         print(f"⚠️  导入中国政府网政策解读爬虫失败: {e}")
     
     # 导入国家发改委爬虫
     try:
-        import ndrc_crawler
+        from Ministries import ndrc_crawler
         manager.register_crawler("国家发改委", ndrc_crawler.run, ndrc_crawler)
     except ImportError as e:
         print(f"⚠️  导入国家发改委爬虫失败: {e}")
     
     # 导入人民网财经爬虫
     # try:
-    #     import people_finance_crawler
+    #     from Ministries import people_finance_crawler
     #     manager.register_crawler("人民网财经", people_finance_crawler.run, people_finance_crawler)
     # except ImportError as e:
     #     print(f"⚠️  导入人民网财经爬虫失败: {e}")
     
     # 注册 mubiao.md 中的16个新爬虫
     try:
-        import miit_wjk_crawler
+        from Ministries import miit_wjk_crawler
         manager.register_crawler("工信部_文件库", miit_wjk_crawler.run, miit_wjk_crawler)
     except ImportError as e:
         print(f"⚠️  导入工信部_文件库爬虫失败: {e}")
     
     try:
-        import miit_zcjd_crawler
+        from Ministries import miit_zcjd_crawler
         manager.register_crawler("工信部_政策解读", miit_zcjd_crawler.run, miit_zcjd_crawler)
     except ImportError as e:
         print(f"⚠️  导入工信部_政策解读爬虫失败: {e}")
     
     try:
-        import nda_zwgk_crawler
+        from Ministries import nda_zwgk_crawler
         manager.register_crawler("数据局_政务公开", nda_zwgk_crawler.run, nda_zwgk_crawler)
     except ImportError as e:
         print(f"⚠️  导入数据局_政务公开爬虫失败: {e}")
     
     try:
-        import mohurd_wjk_crawler
+        from Ministries import mohurd_wjk_crawler
         manager.register_crawler("住建部_文件库", mohurd_wjk_crawler.run, mohurd_wjk_crawler)
     except ImportError as e:
         print(f"⚠️  导入住建部_文件库爬虫失败: {e}")
     
     try:
-        import jiangsu_gov_zxwj_crawler
+        from Jiangsu import jiangsu_gov_zxwj_crawler
         manager.register_crawler("省政府_最新文件", jiangsu_gov_zxwj_crawler.run, jiangsu_gov_zxwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入省政府_最新文件爬虫失败: {e}")
     
     try:
-        import jiangsu_gov_zcjd_crawler
+        from Jiangsu import jiangsu_gov_zcjd_crawler
         manager.register_crawler("省政府_政策解读", jiangsu_gov_zcjd_crawler.run, jiangsu_gov_zcjd_crawler)
     except ImportError as e:
         print(f"⚠️  导入省政府_政策解读爬虫失败: {e}")
     
     try:
-        import jiangsu_gov_gb_crawler
+        from Jiangsu import jiangsu_gov_gb_crawler
         manager.register_crawler("省政府_省政府公报", jiangsu_gov_gb_crawler.run, jiangsu_gov_gb_crawler)
     except ImportError as e:
         print(f"⚠️  导入省政府_省政府公报爬虫失败: {e}")
     
     try:
-        import jiangsu_fzggw_zcwj_crawler
+        from Jiangsu import jiangsu_fzggw_zcwj_crawler
         manager.register_crawler("省发改委_政策文件", jiangsu_fzggw_zcwj_crawler.run, jiangsu_fzggw_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入省发改委_政策文件爬虫失败: {e}")
     
     try:
-        import jiangsu_fzggw_zcjd_crawler
+        from Jiangsu import jiangsu_fzggw_zcjd_crawler
         manager.register_crawler("省发改委_政策解读", jiangsu_fzggw_zcjd_crawler.run, jiangsu_fzggw_zcjd_crawler)
     except ImportError as e:
         print(f"⚠️  导入省发改委_政策解读爬虫失败: {e}")
     
     try:
-        import jiangsu_fzggw_tzgg_crawler
+        from Jiangsu import jiangsu_fzggw_tzgg_crawler
         manager.register_crawler("省发改委_通知公告", jiangsu_fzggw_tzgg_crawler.run, jiangsu_fzggw_tzgg_crawler)
     except ImportError as e:
         print(f"⚠️  导入省发改委_通知公告爬虫失败: {e}")
     
     try:
-        import jiangsu_gxt_gsgg_crawler
+        from Jiangsu import jiangsu_gxt_gsgg_crawler
         manager.register_crawler("省工信厅_公示公告", jiangsu_gxt_gsgg_crawler.run, jiangsu_gxt_gsgg_crawler)
     except ImportError as e:
         print(f"⚠️  导入省工信厅_公示公告爬虫失败: {e}")
     
     try:
-        import jiangsu_gxt_wjtz_crawler
+        from Jiangsu import jiangsu_gxt_wjtz_crawler
         manager.register_crawler("省工信厅_文件通知", jiangsu_gxt_wjtz_crawler.run, jiangsu_gxt_wjtz_crawler)
     except ImportError as e:
         print(f"⚠️  导入省工信厅_文件通知爬虫失败: {e}")
     
     try:
-        import jiangsu_gxt_zcwj_crawler
+        from Jiangsu import jiangsu_gxt_zcwj_crawler
         manager.register_crawler("省工信厅_政策文件", jiangsu_gxt_zcwj_crawler.run, jiangsu_gxt_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入省工信厅_政策文件爬虫失败: {e}")
     
     try:
-        import jiangsu_sjj_zcfb_crawler
+        from Jiangsu import jiangsu_sjj_zcfb_crawler
         manager.register_crawler("省数据局_政策发布", jiangsu_sjj_zcfb_crawler.run, jiangsu_sjj_zcfb_crawler)
     except ImportError as e:
         print(f"⚠️  导入省数据局_政策发布爬虫失败: {e}")
     
     try:
-        import jiangsu_sjj_zcjd_crawler
+        from Jiangsu import jiangsu_sjj_zcjd_crawler
         manager.register_crawler("省数据局_政策解读", jiangsu_sjj_zcjd_crawler.run, jiangsu_sjj_zcjd_crawler)
     except ImportError as e:
         print(f"⚠️  导入省数据局_政策解读爬虫失败: {e}")
     
     try:
-        import jiangsu_czt_gg_crawler
+        from Jiangsu import jiangsu_czt_gg_crawler
         manager.register_crawler("财政厅_公告", jiangsu_czt_gg_crawler.run, jiangsu_czt_gg_crawler)
     except ImportError as e:
         print(f"⚠️  导入财政厅_公告爬虫失败: {e}")
     
     try:
-        import jiangsu_sjj_gg_crawler
+        from Jiangsu import jiangsu_sjj_gg_crawler
         manager.register_crawler("省数据局_通知公告", jiangsu_sjj_gg_crawler.run, jiangsu_sjj_gg_crawler)
     except ImportError as e:
         print(f"⚠️  导入省数据局_通知公告爬虫失败: {e}")
     
     try:
-        import miit_wjfb_crawler
+        from Ministries import miit_wjfb_crawler
         manager.register_crawler("工信部_文件发布", miit_wjfb_crawler.run, miit_wjfb_crawler)
     except ImportError as e:
         print(f"⚠️  导入工信部_文件发布爬虫失败: {e}")
     
     try:
-        import miit_gzdt_crawler
+        from Ministries import miit_gzdt_crawler
         manager.register_crawler("工信部_工作动态", miit_gzdt_crawler.run, miit_gzdt_crawler)
     except ImportError as e:
         print(f"⚠️  导入工信部_工作动态爬虫失败: {e}")
     
     # 导入工信部网站tabbox爬虫
     try:
-        import miit_tabbox_crawler
+        from Ministries import miit_tabbox_crawler
         manager.register_crawler("工信部_网站tabbox", miit_tabbox_crawler.run, miit_tabbox_crawler)
     except ImportError as e:
         print(f"⚠️  导入工信部_网站tabbox爬虫失败: {e}")
     
     # 导入江苏省住房和城乡建设厅爬虫
     try:
-        import jiangsu_zfhcxjst_tf_crawler
+        from Jiangsu import jiangsu_zfhcxjst_tf_crawler
         manager.register_crawler("江苏省住房和城乡建设厅", jiangsu_zfhcxjst_tf_crawler.run, jiangsu_zfhcxjst_tf_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省住房和城乡建设厅爬虫失败: {e}")
     
     # 导入江苏省商务厅意见征集爬虫
     try:
-        import jiangsu_swt_yjzj_crawler
+        from Jiangsu import jiangsu_swt_yjzj_crawler
         manager.register_crawler("江苏省商务厅_意见征集", jiangsu_swt_yjzj_crawler.run, jiangsu_swt_yjzj_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省商务厅_意见征集爬虫失败: {e}")
     
     # 导入江苏省商务厅公告通知爬虫
     try:
-        import jiangsu_swt_ggtz_crawler
+        from Jiangsu import jiangsu_swt_ggtz_crawler
         manager.register_crawler("江苏省商务厅_公告通知", jiangsu_swt_ggtz_crawler.run, jiangsu_swt_ggtz_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省商务厅_公告通知爬虫失败: {e}")
     
     # 导入江苏省商务厅政策及公告爬虫
     try:
-        import jiangsu_swt_zcgg_crawler
+        from Jiangsu import jiangsu_swt_zcgg_crawler
         manager.register_crawler("江苏省商务厅_政策及公告", jiangsu_swt_zcgg_crawler.run, jiangsu_swt_zcgg_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省商务厅_政策及公告爬虫失败: {e}")
     
     # 导入商务部政策发布爬虫
     try:
-        import mofcom_zcfb_crawler
+        from Ministries import mofcom_zcfb_crawler
         manager.register_crawler("商务部_政策发布", mofcom_zcfb_crawler.run, mofcom_zcfb_crawler)
     except ImportError as e:
         print(f"⚠️  导入商务部_政策发布爬虫失败: {e}")
     
     # 导入商务部工作通知爬虫
     try:
-        import mofcom_gztz_crawler
+        from Ministries import mofcom_gztz_crawler
         manager.register_crawler("商务部_工作通知", mofcom_gztz_crawler.run, mofcom_gztz_crawler)
     except ImportError as e:
         print(f"⚠️  导入商务部_工作通知爬虫失败: {e}")
     
     # 导入商务部规划计划爬虫
     try:
-        import mofcom_ghjh_crawler
+        from Ministries import mofcom_ghjh_crawler
         manager.register_crawler("商务部_规划计划", mofcom_ghjh_crawler.run, mofcom_ghjh_crawler)
     except ImportError as e:
         print(f"⚠️  导入商务部_规划计划爬虫失败: {e}")
     
     # 导入江苏省农业农村厅通知公告爬虫
     try:
-        import jiangsu_agriculture_crawler
+        from Jiangsu import jiangsu_agriculture_crawler
         manager.register_crawler("江苏省农业农村厅_通知公告", jiangsu_agriculture_crawler.run, jiangsu_agriculture_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省农业农村厅_通知公告爬虫失败: {e}")
     
     # 导入江苏省教育厅政策文件爬虫
     try:
-        import jiangsu_jyt_zcwj_crawler
+        from Jiangsu import jiangsu_jyt_zcwj_crawler
         manager.register_crawler("江苏省教育厅_政策文件", jiangsu_jyt_zcwj_crawler.run, jiangsu_jyt_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省教育厅_政策文件爬虫失败: {e}")
 
     # 导入江苏省科学技术厅政策文件爬虫
     try:
-        import jiangsu_kxjst_zcwj_crawler
+        from Jiangsu import jiangsu_kxjst_zcwj_crawler
         manager.register_crawler("江苏省科学技术厅_政策文件", jiangsu_kxjst_zcwj_crawler.run, jiangsu_kxjst_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省科学技术厅_政策文件爬虫失败: {e}")
 
     # 导入江苏省知产局通知公告爬虫
     try:
-        import jiangsu_zhichanju_tzgg_crawler
+        from Jiangsu import jiangsu_zhichanju_tzgg_crawler
         manager.register_crawler("江苏省知识产权局_通知公告", jiangsu_zhichanju_tzgg_crawler.run, jiangsu_zhichanju_tzgg_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省知识产权局_通知公告爬虫失败: {e}")
 
      # 导入江苏省国资委政策文件爬虫
     try:
-        import jiangsu_gzw_crawler
+        from Jiangsu import jiangsu_gzw_crawler
         manager.register_crawler("江苏省国资委_政策文件", jiangsu_gzw_crawler.run, jiangsu_gzw_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省国资委_政策文件爬虫失败: {e}")
 
     # 导入江苏省市场监管局政策文件爬虫
     try:
-        import jiangsu_scjgj_zcwj_crawler
+        from Jiangsu import jiangsu_scjgj_zcwj_crawler
         manager.register_crawler("江苏省市场监管局_政策文件", jiangsu_scjgj_zcwj_crawler.run, jiangsu_scjgj_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省市场监管局_政策文件爬虫失败: {e}")
 
      # 导入江苏省交通运输厅政策文件爬虫
     try:
-        import jiangsu_jtyst_zcwj_crawler
+        from Jiangsu import jiangsu_jtyst_zcwj_crawler
         manager.register_crawler("江苏省交通运输厅_政策文件", jiangsu_jtyst_zcwj_crawler.run, jiangsu_jtyst_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省交通运输厅_政策文件爬虫失败: {e}")
 
     # 导入江苏省应急管理厅通知公告爬虫
     try:
-        import jiangsu_yjglt_tzgg_crawler
+        from Jiangsu import jiangsu_yjglt_tzgg_crawler
         manager.register_crawler("江苏省应急管理厅_通知公告", jiangsu_yjglt_tzgg_crawler.run, jiangsu_yjglt_tzgg_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省应急管理厅_通知公告爬虫失败: {e}")
     
     # 导入江苏省自然资源厅政策文件爬虫
     try:
-        import jiangsu_zrzy_crawler
+        from Jiangsu import jiangsu_zrzy_crawler
         manager.register_crawler("江苏省自然资源厅_政策文件", jiangsu_zrzy_crawler.run, jiangsu_zrzy_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省自然资源厅政策文件爬虫失败: {e}")
 
     # 导入江苏省民宗委通知公告爬虫
     try:
-        import jiangsu_mzw_tzgg_crawler
+        from Jiangsu import jiangsu_mzw_tzgg_crawler
         manager.register_crawler("江苏省民宗委_通知公告", jiangsu_mzw_tzgg_crawler.run, jiangsu_mzw_tzgg_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省民宗委通知公告爬虫失败: {e}")
 
     # 导入江苏省公安厅政策文件爬虫
     try:
-        import jiangsu_gat_zcwj_crawler
+        from Jiangsu import jiangsu_gat_zcwj_crawler
         manager.register_crawler("江苏省公安厅_政策文件", jiangsu_gat_zcwj_crawler.run, jiangsu_gat_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入江苏省公安厅政策文件爬虫失败: {e}")
+
+    # 导入江苏省民政厅政策文件爬虫
+    try:
+        from Jiangsu import jiangsu_mzt_zcwj_crawler
+        manager.register_crawler("江苏省民政厅_政策文件", jiangsu_mzt_zcwj_crawler.run, jiangsu_mzt_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省民政厅政策文件爬虫失败: {e}")
+
+    # 导入江苏省人社厅重大民生信息爬虫
+    try:
+        from Jiangsu import jiangsu_jshrss_zdgkc_crawler
+        manager.register_crawler("江苏省人社厅_重大民生信息", jiangsu_jshrss_zdgkc_crawler.run, jiangsu_jshrss_zdgkc_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省人社厅重大民生信息爬虫失败: {e}")
+
+    # 导入江苏省财政厅政策发布爬虫
+    try:
+        from Jiangsu import jiangsu_czt_zcgg_crawler
+        manager.register_crawler("江苏省财政厅_政策发布", jiangsu_czt_zcgg_crawler.run, jiangsu_czt_zcgg_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省财政厅政策发布爬虫失败: {e}")
+
+    # 导入江苏省生态环境厅通知爬虫
+    try:
+        import jiangsu_sthjt_tzgg_crawler
+        manager.register_crawler("江苏省生态环境厅_通知", jiangsu_sthjt_tzgg_crawler.run, jiangsu_sthjt_tzgg_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省生态环境厅通知爬虫失败: {e}")
+
+    # 导入江苏省卫健委规范性文件爬虫
+    try:
+        from Jiangsu import jiangsu_wjw_zcwj_crawler
+        manager.register_crawler("江苏省卫健委_规范性文件", jiangsu_wjw_zcwj_crawler.run, jiangsu_wjw_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省卫健委规范性文件爬虫失败: {e}")
+
+    # 导入江苏省应急管理厅通知公告爬虫
+    try:
+        from Jiangsu import jiangsu_yjglt_tzgg_crawler
+        manager.register_crawler("江苏省应急管理厅_通知公告", jiangsu_yjglt_tzgg_crawler.run, jiangsu_yjglt_tzgg_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省应急管理厅通知公告爬虫失败: {e}")
+
+    # 导入江苏省水利厅规范性文件爬虫
+    try:
+        from Jiangsu import jiangsu_jswater_zcwj_crawler
+        manager.register_crawler("江苏省水利厅_规范性文件", jiangsu_jswater_zcwj_crawler.run, jiangsu_jswater_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省水利厅规范性文件爬虫失败: {e}")
         
     # 执行所有爬虫
     if manager.crawlers:
