@@ -183,17 +183,18 @@ def run():
         print("----------------------------------------")
         data, _ = scrape_data()
         if data:
-            result = save_to_supabase(data)
+            result, api_push_result = save_to_supabase(data)
             print(f"抓取数据: {len(data)} 条")
             print(f"写入数据库: {len(result)} 条")
             print("爬虫 工信部信息通信管理局工作动态 执行成功")
+            return result, api_push_result
         else:
             print("未找到目标日期的文章")
             print("爬虫 工信部信息通信管理局工作动态 执行完成")
-        return data
+            return [], None
     except Exception as e:
         print(f"爬虫 工信部信息通信管理局工作动态 运行失败 - {e}")
-        return []
+        return [], None
 
 # ==========================================
 # 主入口
