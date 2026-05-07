@@ -4,9 +4,6 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import re
 
-# 导入数据库工具
-from db_utils import save_to_policy
-
 # 爬虫配置
 TARGET_URL = "https://wap.miit.gov.cn/jgsj/xgj/gzdt/index.html"
 API_URL = "https://wap.miit.gov.cn/api-gateway/jpaas-publish-server/front/page/build/unit"
@@ -46,8 +43,8 @@ def scrape_data():
         today = datetime.now(tz_utc8).date()
         yesterday = today - timedelta(days=1)
         
-        print(f"📅 运行日期（北京时间）：{today}")
-        print(f"🎯 目标抓取日期：{yesterday}")
+        print(f"运行日期（北京时间）：{today}")
+        print(f"目标抓取日期：{yesterday}")
         
         # 发送API请求
         response = requests.get(API_URL, headers=HEADERS, params=API_PARAMS, timeout=30)
@@ -56,7 +53,7 @@ def scrape_data():
         
         # 查找文章列表
         article_list = soup.find_all('li')
-        print(f"📋 找到 {len(article_list)} 条数据")
+        print(f"找到 {len(article_list)} 条数据")
         
         filtered_count = 0
         
@@ -75,13 +72,13 @@ def scrape_data():
                     continue
                 
                 # 清理链接
-                href = href.replace('"', '')
+                href = href.replace('"', '').replace("\\", "").replace("%5C", "")
                 
                 # 构建完整URL
                 if href.startswith('/'):
                     article_url = f"https://wap.miit.gov.cn{href}"
                 elif not href.startswith('http'):
-                    article_url = f"https://wap.miit.gov.cn{href}"
+                    article_url = f"https://wap.miit.gov.cn/{href}" if not href.startswith('/') else f"https://wap.miit.gov.cn{href}"
                 else:
                     article_url = href
                 
@@ -108,19 +105,25 @@ def scrape_data():
                     detail_resp.raise_for_status()
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
                     
-                    # 查找内容区域
-                    content_div = None
-                    divs = detail_soup.find_all('div')
-                    for div in divs:
-                        text = div.get_text(strip=True)
-                        if text and len(text) > 500:
-                            content_div = div
-                            break
-                    
+                    # 使用id="con_con"查找内容区域
+                    content_div = detail_soup.find('div', id='con_con')
                     if content_div:
                         content = content_div.get_text(strip=True)
+                    else:
+                        # 如果找不到con_con，尝试其他常见内容容器
+                        content_div = detail_soup.find('div', class_='article-content') or detail_soup.find('div', class_='content')
+                        if content_div:
+                            content = content_div.get_text(strip=True)
+                        else:
+                            # 备用方案：查找最大的div内容
+                            max_text = ""
+                            for div in detail_soup.find_all('div'):
+                                text = div.get_text(strip=True)
+                                if len(text) > len(max_text):
+                                    max_text = text
+                            content = max_text
                 except Exception as e:
-                    print(f"⚠️  抓取详情页失败：{e}")
+                    print(f"抓取详情页失败：{e}")
                 
                 # 构建政策数据
                 policy_data = {
@@ -136,21 +139,21 @@ def scrape_data():
                 policies.append(policy_data)
                 
             except Exception as e:
-                print(f"⚠️  单条数据处理失败 - {e}")
+                print(f"单条数据处理失败 - {e}")
                 continue
         
-        print(f"\n✅ 工信部信息通信管理局工作动态爬虫：成功抓取 {len(policies)} 条前一天数据")
-        print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
+        print(f"\n工信部信息通信管理局工作动态爬虫：成功抓取 {len(policies)} 条前一天数据")
+        print(f"过滤掉 {filtered_count} 条非目标日期的数据")
         
         # 显示页面最新5条
         if all_items:
-            print("\n📊 页面最新5条是：")
+            print("\n页面最新5条是：")
             for i, item in enumerate(all_items[:5], 1):
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
-                print(f"✅ {item['title'][:50]}... {date_str}")
+                print(f"{item['title'][:50]}... {date_str}")
         
     except Exception as e:
-        print(f"❌ 工信部信息通信管理局工作动态爬虫：抓取失败 - {e}")
+        print(f"工信部信息通信管理局工作动态爬虫：抓取失败 - {e}")
         print("----------------------------------------")
     
     return policies, all_items
@@ -163,7 +166,12 @@ def save_to_supabase(data_list):
     
     使用统一的数据库工具函数
     """
-    return save_to_policy(data_list, "工信部信息通信管理局工作动态")
+    try:
+        from db_utils import save_to_policy
+        return save_to_policy(data_list, "工信部信息通信管理局工作动态")
+    except Exception as e:
+        print(f"Error saving to database: {e}")
+        return data_list
 
 # ==========================================
 # 3. 主函数
@@ -171,20 +179,20 @@ def save_to_supabase(data_list):
 def run():
     """运行工信部信息通信管理局工作动态爬虫"""
     try:
-        print("🔍 开始执行爬虫: 工信部信息通信管理局工作动态")
+        print("开始执行爬虫: 工信部信息通信管理局工作动态")
         print("----------------------------------------")
         data, _ = scrape_data()
         if data:
             result = save_to_supabase(data)
-            print(f"📊 抓取数据: {len(data)} 条")
-            print(f"💾 写入数据库: {len(result)} 条")
-            print("✅ 爬虫 工信部信息通信管理局工作动态 执行成功")
+            print(f"抓取数据: {len(data)} 条")
+            print(f"写入数据库: {len(result)} 条")
+            print("爬虫 工信部信息通信管理局工作动态 执行成功")
         else:
-            print("⚠️  未找到目标日期的文章")
-            print("✅ 爬虫 工信部信息通信管理局工作动态 执行完成")
+            print("未找到目标日期的文章")
+            print("爬虫 工信部信息通信管理局工作动态 执行完成")
         return data
     except Exception as e:
-        print(f"❌ 爬虫 工信部信息通信管理局工作动态 运行失败 - {e}")
+        print(f"爬虫 工信部信息通信管理局工作动态 运行失败 - {e}")
         return []
 
 # ==========================================

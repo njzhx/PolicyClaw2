@@ -604,6 +604,55 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"⚠️  导入江苏省卫健委规范性文件爬虫失败: {e}")
 
+    # 导入江苏省国资委政策文件爬虫
+    try:
+        from Jiangsu import jiangsu_jsgzw_zcwj_crawler
+        manager.register_crawler("江苏省国资委_政策文件", jiangsu_jsgzw_zcwj_crawler.run, jiangsu_jsgzw_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省国资委政策文件爬虫失败: {e}")
+
+    # 导入江苏省市场监管局政策文件爬虫
+    try:
+        from Jiangsu import jiangsu_scjgj_zcwj_crawler
+        manager.register_crawler("江苏省市场监管局_政策文件", jiangsu_scjgj_zcwj_crawler.run, jiangsu_scjgj_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省市场监管局政策文件爬虫失败: {e}")
+
+    # 导入江苏省市场监管局通知公告爬虫
+    try:
+        from Jiangsu import jiangsu_scjgj_tzgg_crawler
+        manager.register_crawler("江苏省市场监管局_通知公告", jiangsu_scjgj_tzgg_crawler.run, jiangsu_scjgj_tzgg_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省市场监管局通知公告爬虫失败: {e}")
+
+    # 导入江苏省体育局政策文件爬虫
+    try:
+        from Jiangsu import jiangsu_styj_zcwj_crawler
+        manager.register_crawler("江苏省体育局_政策文件", jiangsu_styj_zcwj_crawler.run, jiangsu_styj_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省体育局政策文件爬虫失败: {e}")
+
+    # 导入江苏省医疗保障局政策法规爬虫
+    try:
+        from Jiangsu import jiangsu_ybj_zcfl_crawler
+        manager.register_crawler("江苏省医疗保障局_政策法规", jiangsu_ybj_zcfl_crawler.run, jiangsu_ybj_zcfl_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省医疗保障局政策法规爬虫失败: {e}")
+
+    # 导入江苏省知识产权局政策文件爬虫
+    try:
+        from Jiangsu import jiangsu_jsip_zcwj_crawler
+        manager.register_crawler("江苏省知识产权局_政策文件", jiangsu_jsip_zcwj_crawler.run, jiangsu_jsip_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省知识产权局政策文件爬虫失败: {e}")
+
+    # 导入江苏省国防动员办公室政策文件爬虫
+    try:
+        from Jiangsu import jiangsu_gfdyb_zcwj_crawler
+        manager.register_crawler("江苏省国防动员办公室_政策文件", jiangsu_gfdyb_zcwj_crawler.run, jiangsu_gfdyb_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入江苏省国防动员办公室政策文件爬虫失败: {e}")
+
     # 导入江苏省应急管理厅通知公告爬虫
     try:
         from Jiangsu import jiangsu_yjglt_tzgg_crawler

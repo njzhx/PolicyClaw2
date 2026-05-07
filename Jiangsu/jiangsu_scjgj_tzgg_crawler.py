@@ -8,8 +8,8 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
-TARGET_URL = "https://scjgj.jiangsu.gov.cn/col/col78964/index.html"
-DATAPROXY_URL = "https://scjgj.jiangsu.gov.cn/module/web/jpage/dataproxy.jsp?page=1&appid=1&appid=1&webid=79&path=/&columnid=78964&unitid=310641&permissiontype=0"
+TARGET_URL = "https://scjgj.jiangsu.gov.cn/col/col78963/index.html"
+DATAPROXY_URL = "https://scjgj.jiangsu.gov.cn/module/web/jpage/dataproxy.jsp?page=1&appid=1&webid=79&path=/&columnid=78963&unitid=310641&permissiontype=0"
 
 
 def scrape_data():
@@ -21,7 +21,6 @@ def scrape_data():
         today = datetime.now(tz_utc8).date()
         yesterday = today - timedelta(days=1)
 
-        # 访问 dataproxy 获取数据
         response = requests.get(DATAPROXY_URL, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -117,14 +116,14 @@ def scrape_data():
                     'content': content,
                     'selected': False,
                     'category': '',
-                    'source': '江苏省市场监管局政策文件'
+                    'source': '江苏省市场监管局通知公告'
                 }
                 policies.append(policy_data)
 
             except Exception:
                 continue
 
-        print(f'[OK] 江苏省市场监管局政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 江苏省市场监管局通知公告爬虫：成功抓取 {len(policies)} 条前一天数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
         if all_items:
@@ -134,7 +133,7 @@ def scrape_data():
                 print(f'  {i}. {item["title"][:60]}... {date_str}')
 
     except Exception as e:
-        print(f'[ERROR] 江苏省市场监管局政策文件爬虫：抓取失败 - {e}')
+        print(f'[ERROR] 江苏省市场监管局通知公告爬虫：抓取失败 - {e}')
         print("----------------------------------------")
 
     return policies, all_items
@@ -143,7 +142,7 @@ def scrape_data():
 def save_to_supabase(data_list):
     try:
         from db_utils import save_to_policy
-        return save_to_policy(data_list, "江苏省市场监管局_政策文件")
+        return save_to_policy(data_list, "江苏省市场监管局_通知公告")
     except Exception:
         return data_list
 
@@ -156,7 +155,7 @@ def run():
         print("----------------------------------------")
         return result
     except Exception as e:
-        print(f'[ERROR] 江苏省市场监管局政策文件爬虫：运行失败 - {e}')
+        print(f'[ERROR] 江苏省市场监管局通知公告爬虫：运行失败 - {e}')
         print("----------------------------------------")
         return []
 

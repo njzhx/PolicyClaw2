@@ -8,25 +8,45 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
 
-TARGET_URL = "https://scjgj.jiangsu.gov.cn/col/col78964/index.html"
-DATAPROXY_URL = "https://scjgj.jiangsu.gov.cn/module/web/jpage/dataproxy.jsp?page=1&appid=1&appid=1&webid=79&path=/&columnid=78964&unitid=310641&permissiontype=0"
+TARGET_URL = "https://jsgzw.jiangsu.gov.cn/col/col85683/index.html"
 
 
 def scrape_data():
     policies = []
     all_items = []
+    url = TARGET_URL
 
     try:
         tz_utc8 = timezone(timedelta(hours=8))
         today = datetime.now(tz_utc8).date()
         yesterday = today - timedelta(days=1)
 
-        # 访问 dataproxy 获取数据
-        response = requests.get(DATAPROXY_URL, headers=headers, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        records = soup.find_all('record')
+        # 查找目标容器
+        target_div = soup.find('div', attrs={'aria-label': '视窗区'})
+        if not target_div:
+            print('[ERROR] 江苏省国资委政策文件爬虫：未找到目标容器 div[@aria-label="视窗区"]')
+            return policies, all_items
+
+        # 查找 script 标签
+        scripts = target_div.find_all('script')
+        script_content = None
+        for script in scripts:
+            if script.string and '<record>' in script.string:
+                script_content = script.string
+                break
+
+        if not script_content:
+            print('[ERROR] 江苏省国资委政策文件爬虫：未找到数据脚本')
+            return policies, all_items
+
+        # 解析 XML 数据
+        record_soup = BeautifulSoup(script_content, 'html.parser')
+        records = record_soup.find_all('record')
+
         filtered_count = 0
 
         for record in records:
@@ -44,19 +64,20 @@ def scrape_data():
                 if not a_tag:
                     continue
 
+                # 标题从 a 标签的 title 属性提取
                 title = a_tag.get('title', '').strip()
                 if not title:
                     title = a_tag.get_text(strip=True)
                 href = a_tag.get('href', '').strip()
 
-                if not title or not href:
+                if not title:
                     continue
 
                 # 处理URL
                 if href.startswith('/'):
-                    article_url = "https://scjgj.jiangsu.gov.cn" + href
+                    article_url = "https://jsgzw.jiangsu.gov.cn" + href
                 elif not href.startswith('http'):
-                    article_url = "https://scjgj.jiangsu.gov.cn" + href
+                    article_url = "https://jsgzw.jiangsu.gov.cn" + href
                 else:
                     article_url = href
 
@@ -73,6 +94,7 @@ def scrape_data():
                         except ValueError:
                             pass
 
+                # 如果span中没有，从链接路径提取日期
                 if not pub_at:
                     date_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', href)
                     if date_match:
@@ -81,8 +103,10 @@ def scrape_data():
                         except ValueError:
                             pass
 
+                # 保存到 all_items 用于显示最新5条
                 all_items.append({'title': title, 'pub_at': pub_at})
 
+                # 过滤非目标日期
                 if pub_at != yesterday:
                     filtered_count += 1
                     continue
@@ -93,7 +117,8 @@ def scrape_data():
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
 
-                    for selector in ['#barrierfree_container', 'div.main-content', '.TRS_Editor', '#zoom', '.content', '#content']:
+                    # 尝试多个选择器
+                    for selector in ['#barrierfree_container', 'div.main-fl.bt-left', '.TRS_Editor', '#zoom', '.content', '#content', '.article-content']:
                         elem = detail_soup.select_one(selector)
                         if elem:
                             text = elem.get_text(separator='\n', strip=True)
@@ -102,6 +127,7 @@ def scrape_data():
                                 content = '\n'.join(lines)
                                 break
 
+                    # 验证content是否爬取成功
                     if not content or len(content) < 50:
                         print(f'[WARN] 警告：文章内容可能未爬取成功 - {title[:50]}')
                         print(f'   链接: {article_url}')
@@ -117,16 +143,17 @@ def scrape_data():
                     'content': content,
                     'selected': False,
                     'category': '',
-                    'source': '江苏省市场监管局政策文件'
+                    'source': '江苏省国资委政策文件'
                 }
                 policies.append(policy_data)
 
             except Exception:
                 continue
 
-        print(f'[OK] 江苏省市场监管局政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 江苏省国资委政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
+        # 显示页面最新5条
         if all_items:
             print('[INFO] 页面最新5条是：')
             for i, item in enumerate(all_items[:5], 1):
@@ -134,7 +161,7 @@ def scrape_data():
                 print(f'  {i}. {item["title"][:60]}... {date_str}')
 
     except Exception as e:
-        print(f'[ERROR] 江苏省市场监管局政策文件爬虫：抓取失败 - {e}')
+        print(f'[ERROR] 江苏省国资委政策文件爬虫：抓取失败 - {e}')
         print("----------------------------------------")
 
     return policies, all_items
@@ -143,7 +170,7 @@ def scrape_data():
 def save_to_supabase(data_list):
     try:
         from db_utils import save_to_policy
-        return save_to_policy(data_list, "江苏省市场监管局_政策文件")
+        return save_to_policy(data_list, "江苏省国资委_政策文件")
     except Exception:
         return data_list
 
@@ -156,7 +183,7 @@ def run():
         print("----------------------------------------")
         return result
     except Exception as e:
-        print(f'[ERROR] 江苏省市场监管局政策文件爬虫：运行失败 - {e}')
+        print(f'[ERROR] 江苏省国资委政策文件爬虫：运行失败 - {e}')
         print("----------------------------------------")
         return []
 

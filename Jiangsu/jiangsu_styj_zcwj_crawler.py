@@ -1,15 +1,13 @@
-
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import re
 
 headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-TARGET_URL = "https://scjgj.jiangsu.gov.cn/col/col78964/index.html"
-DATAPROXY_URL = "https://scjgj.jiangsu.gov.cn/module/web/jpage/dataproxy.jsp?page=1&appid=1&appid=1&webid=79&path=/&columnid=78964&unitid=310641&permissiontype=0"
+TARGET_URL = "https://jsstyj.jiangsu.gov.cn/col/col79483/index.html"
 
 
 def scrape_data():
@@ -21,60 +19,63 @@ def scrape_data():
         today = datetime.now(tz_utc8).date()
         yesterday = today - timedelta(days=1)
 
-        # 访问 dataproxy 获取数据
-        response = requests.get(DATAPROXY_URL, headers=headers, timeout=30)
+        response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        records = soup.find_all('record')
+        items = []
+        
+        target_div = soup.find('div', attrs={'aria-label': '正文区,综合政务'})
+        if target_div:
+            script_tag = target_div.find('script', type='text/xml')
+            if script_tag and script_tag.string:
+                datastore_soup = BeautifulSoup(script_tag.string, 'html.parser')
+                records = datastore_soup.find_all('record')
+                for record in records:
+                    cdata = record.string
+                    if cdata:
+                        record_soup = BeautifulSoup(cdata, 'html.parser')
+                        li_elems = record_soup.find_all('li')
+                        items.extend(li_elems)
+        
+        if not items:
+            all_links = soup.find_all('a', href=True)
+            policy_links = [a for a in all_links if '/art/' in a.get('href', '')]
+            for a_tag in policy_links:
+                items.append(a_tag.parent if a_tag.parent else a_tag)
+
         filtered_count = 0
 
-        for record in records:
+        for item in items:
             try:
-                cdata_content = record.string
-                if not cdata_content:
-                    continue
-
-                li_soup = BeautifulSoup(cdata_content, 'html.parser')
-                li_tag = li_soup.find('li')
-                if not li_tag:
-                    continue
-
-                a_tag = li_tag.find('a')
+                a_tag = item.find('a') if item.name != 'a' else item
                 if not a_tag:
                     continue
 
-                title = a_tag.get('title', '').strip()
-                if not title:
-                    title = a_tag.get_text(strip=True)
+                title = a_tag.get('title', '').strip() or a_tag.get_text(strip=True)
                 href = a_tag.get('href', '').strip()
 
-                if not title or not href:
+                if not title or not href or len(title) < 5:
                     continue
 
-                # 处理URL
                 if href.startswith('/'):
-                    article_url = "https://scjgj.jiangsu.gov.cn" + href
+                    article_url = "https://jsstyj.jiangsu.gov.cn" + href
                 elif not href.startswith('http'):
-                    article_url = "https://scjgj.jiangsu.gov.cn" + href
+                    article_url = "https://jsstyj.jiangsu.gov.cn" + href
                 else:
                     article_url = href
 
-                # 提取日期
                 pub_at = None
-                spans = li_tag.find_all('span')
-                for span in spans:
-                    span_text = span.get_text(strip=True)
-                    date_match = re.search(r'(\d{4}-\d{1,2}-\d{1,2})', span_text)
-                    if date_match:
-                        try:
-                            pub_at = datetime.strptime(date_match.group(1), '%Y-%m-%d').date()
-                            break
-                        except ValueError:
-                            pass
+                date_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', href)
+                if date_match:
+                    try:
+                        pub_at = datetime.strptime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", '%Y-%m-%d').date()
+                    except ValueError:
+                        pass
 
                 if not pub_at:
-                    date_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', href)
+                    date_text = item.get_text()
+                    date_match = re.search(r'(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})', date_text)
                     if date_match:
                         try:
                             pub_at = datetime.strptime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", '%Y-%m-%d').date()
@@ -87,13 +88,12 @@ def scrape_data():
                     filtered_count += 1
                     continue
 
-                # 抓取详情页内容
                 content = ""
                 try:
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
 
-                    for selector in ['#barrierfree_container', 'div.main-content', '.TRS_Editor', '#zoom', '.content', '#content']:
+                    for selector in ['#barrierfree_container', '.TRS_Editor', '#zoom', '.content', '#content', '.article-content', '.main-content']:
                         elem = detail_soup.select_one(selector)
                         if elem:
                             text = elem.get_text(separator='\n', strip=True)
@@ -103,9 +103,9 @@ def scrape_data():
                                 break
 
                     if not content or len(content) < 50:
-                        print(f'[WARN] 警告：文章内容可能未爬取成功 - {title[:50]}')
-                        print(f'   链接: {article_url}')
-                        print(f'   内容长度: {len(content)} 字符')
+                        content_elem = detail_soup.find('div', class_='left')
+                        if content_elem:
+                            content = content_elem.get_text(separator='\n', strip=True)
 
                 except Exception as e:
                     print(f'[WARN] 抓取详情页失败: {article_url} - {e}')
@@ -117,14 +117,14 @@ def scrape_data():
                     'content': content,
                     'selected': False,
                     'category': '',
-                    'source': '江苏省市场监管局政策文件'
+                    'source': '江苏省体育局政策文件'
                 }
                 policies.append(policy_data)
 
-            except Exception:
+            except Exception as e:
                 continue
 
-        print(f'[OK] 江苏省市场监管局政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 江苏省体育局政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
         if all_items:
@@ -134,7 +134,7 @@ def scrape_data():
                 print(f'  {i}. {item["title"][:60]}... {date_str}')
 
     except Exception as e:
-        print(f'[ERROR] 江苏省市场监管局政策文件爬虫：抓取失败 - {e}')
+        print(f'[ERROR] 江苏省体育局政策文件爬虫：抓取失败 - {e}')
         print("----------------------------------------")
 
     return policies, all_items
@@ -143,7 +143,7 @@ def scrape_data():
 def save_to_supabase(data_list):
     try:
         from db_utils import save_to_policy
-        return save_to_policy(data_list, "江苏省市场监管局_政策文件")
+        return save_to_policy(data_list, "江苏省体育局_政策文件")
     except Exception:
         return data_list
 
@@ -156,7 +156,7 @@ def run():
         print("----------------------------------------")
         return result
     except Exception as e:
-        print(f'[ERROR] 江苏省市场监管局政策文件爬虫：运行失败 - {e}')
+        print(f'[ERROR] 江苏省体育局政策文件爬虫：运行失败 - {e}')
         print("----------------------------------------")
         return []
 
