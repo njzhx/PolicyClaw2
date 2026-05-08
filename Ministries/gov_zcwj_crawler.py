@@ -3,22 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import re
-import time
 
-SELENIUM_AVAILABLE = False
-try:
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-    from webdriver_manager.chrome import ChromeDriverManager
-    from selenium.webdriver.chrome.service import Service
-    SELENIUM_AVAILABLE = True
-except ImportError:
-    print("Selenium not installed, will try alternative method")
-
-headers = {
+Headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'application/json, text/plain, */*',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
@@ -37,6 +23,7 @@ CATEGORY_MAP = {
     'otherfile': '其他文件',
     'gongbao': '国务院公报'
 }
+
 
 def get_api_session():
     session = requests.Session()
@@ -57,81 +44,6 @@ def get_api_session():
     return session
 
 
-def scrape_with_selenium():
-    options = Options()
-    options.add_argument('--headless=new')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-logging')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-gpu-sandbox')
-    options.add_argument('--ignore-certificate-errors')
-    options.add_argument('--disable-setuid-sandbox')
-    options.add_argument('--window-size=1920,1080')
-    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_argument('--disable-web-security')
-    options.add_argument('--allow-running-insecure-content')
-    
-    max_retries = 2
-    for attempt in range(max_retries):
-        try:
-            service = Service(ChromeDriverManager().install())
-            driver = webdriver.Chrome(service=service, options=options)
-            
-            driver.set_page_load_timeout(45)
-            driver.set_script_timeout(45)
-            driver.get(TARGET_URL)
-            
-            time.sleep(8)
-            
-            last_height = driver.execute_script("return document.body.scrollHeight")
-            scroll_count = 0
-            max_scrolls = 15
-            
-            while scroll_count < max_scrolls:
-                for _ in range(3):
-                    driver.execute_script("window.scrollBy(0, 500);")
-                    time.sleep(0.3)
-                
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1)
-                
-                try:
-                    new_height = driver.execute_script("return document.body.scrollHeight")
-                except:
-                    new_height = last_height
-                
-                if new_height == last_height:
-                    scroll_count += 1
-                else:
-                    scroll_count = 0
-                    last_height = new_height
-                
-                if scroll_count >= 3:
-                    break
-            
-            time.sleep(2)
-            
-            page_source = driver.page_source
-            driver.quit()
-            
-            return page_source
-        except Exception as e:
-            print(f"Selenium attempt {attempt + 1} failed: {e}")
-            try:
-                driver.quit()
-            except:
-                pass
-            
-            if attempt < max_retries - 1:
-                time.sleep(3)
-    
-    return None
-
-
 def scrape_with_api():
     try:
         session = get_api_session()
@@ -142,7 +54,7 @@ def scrape_with_api():
             'n': '200',
             'type': 'gwyzcwjk'
         }
-        response = session.get(API_URL, headers=headers, params=params, timeout=30)
+        response = session.get(API_URL, headers=Headers, params=params, timeout=30)
         data = response.json()
         searchVO = data.get('searchVO', {})
         catMap = searchVO.get('catMap', {})
@@ -197,13 +109,13 @@ def scrape_data():
         today = datetime.now(tz_utc8).date()
         yesterday = today - timedelta(days=1)
         
-        print(f"Running date (Beijing): {today}")
-        print(f"Target date: {yesterday}")
+        print(f"运行日期（北京时间）：{today}")
+        print(f"目标抓取日期：{yesterday}")
         
-        print("Using API to fetch data...")
+        print("正在从API获取数据...")
         all_items = scrape_with_api()
         
-        print(f"Found {len(all_items)} items from API")
+        print(f"API返回 {len(all_items)} 条数据")
         
         filtered_count = 0
         
@@ -226,7 +138,7 @@ def scrape_data():
                 
                 content = ""
                 try:
-                    detail_resp = requests.get(href, headers=headers, timeout=15)
+                    detail_resp = requests.get(href, headers=Headers, timeout=15)
                     detail_resp.raise_for_status()
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
                     
@@ -245,7 +157,7 @@ def scrape_data():
                                     max_text = text
                             content = max_text
                 except Exception as e:
-                    print(f"Detail page fetch failed: {href} - {e}")
+                    print(f"抓取详情页失败：{e}")
                 
                 policy_data = {
                     'title': title,
@@ -260,24 +172,23 @@ def scrape_data():
                 policies.append(policy_data)
                 
             except Exception as e:
-                print(f"Single item processing failed - {e}")
+                print(f"单条数据处理失败 - {e}")
                 continue
         
-        print(f"\nState Council Document Crawler: Successfully crawled {len(policies)} items from yesterday")
-        print(f"Filtered out {filtered_count} non-target-date items")
+        print(f"\n国务院文件爬虫：成功抓取 {len(policies)} 条前一天数据")
+        print(f"过滤掉 {filtered_count} 条非目标日期的数据")
         
         if all_items:
-            print(f"\nAll items found on page (total: {len(all_items)}):")
+            print(f"\n页面最新5条是：")
             sorted_items = sorted(all_items, key=lambda x: x['pub_at'] or datetime.min.date(), reverse=True)
-            for i, item in enumerate(sorted_items, 1):
-                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else 'Unknown date'
+            for i, item in enumerate(sorted_items[:5], 1):
+                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 title_clean = re.sub(r'\s+', ' ', item['title'])
-                print(f"{i}. {title_clean[:70]} [{date_str}]")
+                print(f"{title_clean[:50]}... {date_str}")
         
     except Exception as e:
-        print(f"State Council Document Crawler: Failed - {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"国务院文件爬虫：抓取失败 - {e}")
+        print("----------------------------------------")
     
     return policies, all_items
 
@@ -293,21 +204,21 @@ def save_to_supabase(data_list):
 
 def run():
     try:
-        print("Starting Crawler: State Council Documents")
-        print("----------------------------------------")
         data, _ = scrape_data()
         if data:
             result, api_push_result = save_to_supabase(data)
-            print(f"Crawled: {len(data)} items")
-            print(f"Written to database: {len(result)} items")
-            print("State Council Document Crawler: Success")
+            print(f"\n写入数据库: {len(result)} 条")
+            print("----------------------------------------")
+            print("爬虫 国务院文件 执行成功")
             return result, api_push_result
         else:
-            print("No target date articles found")
-            print("State Council Document Crawler: Completed")
+            print(f"\n写入数据库: 0 条")
+            print("----------------------------------------")
+            print("未找到目标日期的文章")
             return [], None
     except Exception as e:
-        print(f"State Council Document Crawler: Failed - {e}")
+        print(f"爬虫 国务院文件 运行失败 - {e}")
+        print("----------------------------------------")
         return [], None
 
 
