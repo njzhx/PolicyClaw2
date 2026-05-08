@@ -307,6 +307,13 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"⚠️  导入中国政府网政策解读爬虫失败: {e}")
     
+    # 导入国务院文件爬虫
+    try:
+        from Ministries import gov_zcwj_crawler
+        manager.register_crawler("国务院文件", gov_zcwj_crawler.run, gov_zcwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入国务院文件爬虫失败: {e}")
+    
     # 导入国家发改委爬虫
     try:
         from Ministries import ndrc_crawler
