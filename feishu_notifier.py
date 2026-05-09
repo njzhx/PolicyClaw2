@@ -148,11 +148,6 @@ class FeishuNotifier:
         tz_utc8 = timezone(timedelta(hours=8))
         beijing_start_time = start_time.astimezone(tz_utc8)
         
-        # 计算统计信息
-        total_crawlers = len(results)
-        success_count = sum(1 for r in results.values() if r['status'] == 'success')
-        error_count = sum(1 for r in results.values() if r['status'] == 'error')
-        
         # 构建富文本内容
         content = []
         
@@ -161,45 +156,39 @@ class FeishuNotifier:
             {"tag": "text", "text": f"🚀 爬虫任务 - {beijing_start_time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）"}
         ])
         
-        # 统计信息行
-        content.append([
-            {"tag": "text", "text": f"📦 执行爬虫{total_crawlers}个，成功{success_count}个，失败{error_count}个"}
-        ])
-        
         # 分隔线
         content.append([{"tag": "text", "text": "==================="}])
         
-        # 各爬虫详情
+        # 只显示过滤掉0条的爬虫（可能未正确获取内容）
+        zero_filter_crawlers = []
         for name, result in results.items():
-            target_url = result.get('target_url', '')
-            
-            # 爬虫名称行 - 带链接
-            if target_url:
-                content.append([
-                    {"tag": "text", "text": "📦 "},
-                    {"tag": "a", "text": name, "href": target_url}
-                ])
-            else:
-                content.append([
-                    {"tag": "text", "text": f"📦 {name}"}
-                ])
-            
-            # 状态行
-            status_emoji = "✅" if result['status'] == 'success' else "❌"
             if result['status'] == 'success':
                 filter_count = result.get('filter_count', 0)
-                content.append([
-                    {"tag": "text", "text": f"{status_emoji} 过滤掉 {filter_count} 条，抓取 {result['crawl_count']} 条，写入 {result['write_count']} 条"}
-                ])
-            else:
-                content.append([
-                    {"tag": "text", "text": f"{status_emoji} 执行失败 - {result.get('error_message', '未知错误')[:50]}..."}
-                ])
-            
-            # 分隔线
-            content.append([{"tag": "text", "text": "------------------------------"}])
+                if filter_count == 0:
+                    zero_filter_crawlers.append(name)
         
-        # 底部分隔线
+        if zero_filter_crawlers:
+            for name in zero_filter_crawlers:
+                result = results[name]
+                target_url = result.get('target_url', '')
+                
+                if target_url:
+                    content.append([
+                        {"tag": "text", "text": "📦 "},
+                        {"tag": "a", "text": name, "href": target_url},
+                        {"tag": "text", "text": " 过滤掉 0 条"}
+                    ])
+                else:
+                    content.append([
+                        {"tag": "text", "text": f"📦 {name} 过滤掉 0 条"}
+                    ])
+            
+            # 警告提示
+            content.append([{"tag": "text", "text": "疑似爬取内容不成功，请检查。"}])
+        else:
+            content.append([{"tag": "text", "text": "✅ 所有爬虫均正常获取内容"}])
+        
+        # 分隔线
         content.append([{"tag": "text", "text": "==================="}])
         
         # 添加API推送结果
