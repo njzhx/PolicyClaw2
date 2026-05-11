@@ -18,7 +18,7 @@ try:
     from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
     CRAWL4AI_AVAILABLE = True
 except ImportError:
-    print("[WARN] crawl4ai not installed, will try alternative method")
+    print("[WARN] crawl4ai not installed")
 
 SELENIUM_AVAILABLE = False
 try:
@@ -28,7 +28,7 @@ try:
     from webdriver_manager.chrome import ChromeDriverManager
     SELENIUM_AVAILABLE = True
 except ImportError:
-    print("[WARN] Selenium not installed, will try requests")
+    print("[WARN] Selenium not installed")
 
 
 def parse_date(date_str):
@@ -142,7 +142,29 @@ async def scrape_data_async():
         
         if CRAWL4AI_AVAILABLE:
             print("[INFO] 使用crawl4ai获取页面...")
-            markdown_content = await scrape_with_crawl4ai()
+            try:
+                markdown_content = await scrape_with_crawl4ai()
+            except Exception as e:
+                print(f"[WARN] crawl4ai执行失败: {e}")
+                markdown_content = None
+        
+        if not markdown_content and SELENIUM_AVAILABLE:
+            print("[INFO] 使用Selenium获取页面...")
+            try:
+                page_source = scrape_with_selenium()
+            except Exception as e:
+                print(f"[WARN] Selenium执行失败: {e}")
+                page_source = None
+        
+        if not markdown_content and not page_source:
+            print("[INFO] 使用requests获取页面...")
+            try:
+                response = requests.get(TARGET_URL, headers=headers, timeout=30)
+                response.raise_for_status()
+                page_source = response.text
+            except Exception as e:
+                print(f"[WARN] requests执行失败: {e}")
+                page_source = None
         
         if markdown_content:
             print("[INFO] 从markdown中提取文章数据...")
@@ -158,17 +180,7 @@ async def scrape_data_async():
                 except Exception as e:
                     print(f"[WARN] 解析失败: {e}")
                     continue
-        else:
-            if SELENIUM_AVAILABLE:
-                print("[INFO] 使用Selenium获取页面...")
-                page_source = scrape_with_selenium()
-            
-            if not page_source:
-                print("[INFO] 使用requests获取页面...")
-                response = requests.get(TARGET_URL, headers=headers, timeout=30)
-                response.raise_for_status()
-                page_source = response.text
-            
+        elif page_source:
             soup = BeautifulSoup(page_source, 'html.parser')
             
             ul_list = soup.find('ul', class_='list')
@@ -183,7 +195,7 @@ async def scrape_data_async():
                             continue
                         
                         title = a.get_text(strip=True)
-                        href = li.find('a').get('href', '')
+                        href = a.get('href', '')
                         
                         if not title or not href:
                             continue
