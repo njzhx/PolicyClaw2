@@ -203,20 +203,43 @@ class FeishuNotifier:
                     api_results_added = True
                     status = api_result.get('status', 'unknown')
                     message = api_result.get('message', '')
+                    target_url = result.get('target_url', '')
+                    
                     if status == 'success':
-                        content.append([
-                            {"tag": "text", "text": f"✅ {name}：{message}"}
-                        ])
+                        if target_url:
+                            content.append([
+                                {"tag": "text", "text": "✅ "},
+                                {"tag": "a", "text": name, "href": target_url},
+                                {"tag": "text", "text": f"：{message}"}
+                            ])
+                        else:
+                            content.append([
+                                {"tag": "text", "text": f"✅ {name}：{message}"}
+                            ])
                         api_success_count += 1
                     elif status == 'error':
-                        content.append([
-                            {"tag": "text", "text": f"❌ {name}：{message}"}
-                        ])
+                        if target_url:
+                            content.append([
+                                {"tag": "text", "text": "❌ "},
+                                {"tag": "a", "text": name, "href": target_url},
+                                {"tag": "text", "text": f"：{message}"}
+                            ])
+                        else:
+                            content.append([
+                                {"tag": "text", "text": f"❌ {name}：{message}"}
+                            ])
                         api_error_count += 1
                     else:
-                        content.append([
-                            {"tag": "text", "text": f"⚠️ {name}：{message}"}
-                        ])
+                        if target_url:
+                            content.append([
+                                {"tag": "text", "text": "⚠️ "},
+                                {"tag": "a", "text": name, "href": target_url},
+                                {"tag": "text", "text": f"：{message}"}
+                            ])
+                        else:
+                            content.append([
+                                {"tag": "text", "text": f"⚠️ {name}：{message}"}
+                            ])
         
         if api_results_added:
             content.append([
