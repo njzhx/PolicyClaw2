@@ -876,6 +876,13 @@ if __name__ == "__main__":
         manager.register_crawler("国家互联网信息办公室（政策）", cac_zcwj_crawler.run, cac_zcwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入国家互联网信息办公室政策文件爬虫失败: {e}")
+
+    # 导入国家药品监督管理局爬虫
+    try:
+        from Ministries import nmpa_fgwj_crawler
+        manager.register_crawler("国家药品监督管理局_法规文件", nmpa_fgwj_crawler.run, nmpa_fgwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入国家药品监督管理局爬虫失败: {e}")
         
     # 执行所有爬虫
     if manager.crawlers:
