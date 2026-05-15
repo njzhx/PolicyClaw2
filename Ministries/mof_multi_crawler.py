@@ -1,4 +1,5 @@
 import requests
+import time
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin
@@ -60,13 +61,12 @@ def scrape_single_config(config):
 
         for retry in range(3):
             try:
-                response = requests.get(url, headers=headers, timeout=30)
+                response = requests.get(url, headers=headers, timeout=45)
                 response.raise_for_status()
                 break
             except Exception:
                 if retry == 2:
                     raise
-                import time
                 time.sleep(1)
         soup = BeautifulSoup(response.content, 'html.parser')
 
@@ -129,7 +129,15 @@ def scrape_single_config(config):
 
                 content = ""
                 try:
-                    detail_resp = requests.get(article_url, headers=headers, timeout=15)
+                    for retry in range(3):
+                        try:
+                            detail_resp = requests.get(article_url, headers=headers, timeout=30)
+                            detail_resp.raise_for_status()
+                            break
+                        except Exception:
+                            if retry == 2:
+                                raise
+                            time.sleep(0.5)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
 
                     content_elem = detail_soup.find('div', class_='TRS_Editor')
