@@ -370,6 +370,19 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"⚠️  导入财政部通知公告爬虫失败: {e}")
     
+    # 导入财政部多栏目爬虫
+    try:
+        from Ministries import mof_multi_crawler
+        manager.register_crawler("财政部经济建设司_通知公告", mof_multi_crawler.run_财政部经济建设司_通知公告, mof_multi_crawler)
+        manager.register_crawler("财政部经济建设司_政策法规", mof_multi_crawler.run_财政部经济建设司_政策法规, mof_multi_crawler)
+        manager.register_crawler("财政部农业农村司_政策发布", mof_multi_crawler.run_财政部农业农村司_政策发布, mof_multi_crawler)
+        manager.register_crawler("财政部社会保障司_工作动态", mof_multi_crawler.run_财政部社会保障司_工作动态, mof_multi_crawler)
+        manager.register_crawler("财政部科教和文化司_工作动态", mof_multi_crawler.run_财政部科教和文化司_工作动态, mof_multi_crawler)
+        manager.register_crawler("财政部科教和文化司_工作通知", mof_multi_crawler.run_财政部科教和文化司_工作通知, mof_multi_crawler)
+        manager.register_crawler("财政部科教和文化司_政策发布", mof_multi_crawler.run_财政部科教和文化司_政策发布, mof_multi_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入财政部多栏目爬虫失败: {e}")
+    
     # 导入人社部政策文件爬虫
     try:
         from Ministries import mohrss_crawler

@@ -8,33 +8,68 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
 
-TARGET_URL = "https://www.moa.gov.cn/govpublic/1/index.htm"
+CRAWLER_CONFIGS = [
+    {
+        'name': '财政部经济建设司_通知公告',
+        'url': 'https://jjs.mof.gov.cn/tongzhigonggao/',
+        'source': '财政部经济建设司_通知公告'
+    },
+    {
+        'name': '财政部经济建设司_政策法规',
+        'url': 'https://jjs.mof.gov.cn/zhengcefagui/',
+        'source': '财政部经济建设司_政策法规'
+    },
+    {
+        'name': '财政部农业农村司_政策发布',
+        'url': 'https://nys.mof.gov.cn/czpjZhengCeFaBu_2_2/',
+        'source': '财政部农业农村司_政策发布'
+    },
+    {
+        'name': '财政部社会保障司_工作动态',
+        'url': 'https://sbs.mof.gov.cn/gongzuodongtai/',
+        'source': '财政部社会保障司_工作动态'
+    },
+    {
+        'name': '财政部科教和文化司_工作动态',
+        'url': 'https://jkw.mof.gov.cn/gongzuodongtai/',
+        'source': '财政部科教和文化司_工作动态'
+    },
+    {
+        'name': '财政部科教和文化司_工作通知',
+        'url': 'https://jkw.mof.gov.cn/gongzuotongzhi/',
+        'source': '财政部科教和文化司_工作通知'
+    },
+    {
+        'name': '财政部科教和文化司_政策发布',
+        'url': 'https://jkw.mof.gov.cn/zhengcefabu/',
+        'source': '财政部科教和文化司_政策发布'
+    }
+]
 
 
-def scrape_data():
+def scrape_single_config(config):
     policies = []
     all_items = []
-    url = TARGET_URL
+    url = config['url']
+    source_name = config['name']
 
     try:
         tz_utc8 = timezone(timedelta(hours=8))
         today = datetime.now(tz_utc8).date()
         yesterday = today - timedelta(days=1)
-        print(f"[DATE] 运行日期（北京时间）：{today}")
-        print(f"[TARGET] 目标抓取日期：{yesterday}")
 
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        ul_element = soup.find('ul', class_='commonlist')
+        ul_element = soup.find('ul', class_='liBox')
         if not ul_element:
-            print('[ERROR] 农业农村部政府信息公开爬虫：未找到目标列表 ul.commonlist')
+            print(f'[ERROR] {source_name}：未找到目标列表 ul.liBox')
             return policies, all_items
 
         li_elements = ul_element.find_all('li')
         if not li_elements:
-            print('[ERROR] 农业农村部政府信息公开爬虫：列表为空')
+            print(f'[ERROR] {source_name}：列表为空')
             return policies, all_items
 
         filtered_count = 0
@@ -56,7 +91,7 @@ def scrape_data():
 
                 article_url = href
                 if not article_url.startswith('http'):
-                    article_url = urljoin(TARGET_URL, href)
+                    article_url = urljoin(url, href)
 
                 pub_at = None
                 span_tags = li.find_all('span')
@@ -89,22 +124,19 @@ def scrape_data():
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
 
-                    content_elem = detail_soup.find('div', class_='gsj_htmlcon')
+                    content_elem = detail_soup.find('div', class_='TRS_Editor')
                     if not content_elem:
-                        content_elem = detail_soup.find('div', class_='gsj_htmlcon_bot')
+                        content_elem = detail_soup.find('div', class_='my_doccontent')
+                    if not content_elem:
+                        content_elem = detail_soup.find('div', class_='my_conboxzw')
                     if content_elem:
                         text = content_elem.get_text(separator='\n', strip=True)
                         lines = [line.strip() for line in text.split('\n') if line.strip()]
                         if lines:
                             content = '\n'.join(lines)
 
-                    if not content or len(content) < 50:
-                        print(f'[WARN] 警告：文章内容可能未爬取成功 - {title[:50]}')
-                        print(f'   链接: {article_url}')
-                        print(f'   内容长度: {len(content)} 字符')
-
                 except Exception as e:
-                    print(f'[WARN] 抓取详情页失败: {article_url} - {e}')
+                    pass
 
                 policy_data = {
                     'title': title,
@@ -113,50 +145,60 @@ def scrape_data():
                     'content': content,
                     'selected': False,
                     'category': '',
-                    'source': '农业农村部政府信息公开'
+                    'source': config['source']
                 }
                 policies.append(policy_data)
 
             except Exception:
                 continue
 
-        print(f'[OK] 农业农村部政府信息公开爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] {source_name}：成功抓取 {len(policies)} 条前一天数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
-        if all_items:
-            print('[INFO] 页面最新5条是：')
-            for i, item in enumerate(all_items[:5], 1):
-                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
-                print(f'  {i}. {item["title"][:60]}... {date_str}')
-
     except Exception as e:
-        print(f'[ERROR] 农业农村部政府信息公开爬虫：抓取失败 - {e}')
+        print(f'[ERROR] {source_name}：抓取失败 - {e}')
         print("----------------------------------------")
 
     return policies, all_items
 
 
-def save_to_supabase(data_list):
+def save_to_supabase(data_list, source_name):
     try:
         from db_utils import save_to_policy
-        return save_to_policy(data_list, "农业农村部_政府信息公开")
+        return save_to_policy(data_list, source_name)
     except Exception:
         return data_list
 
 
-def run():
-    try:
-        data, _ = scrape_data()
-        result = save_to_supabase(data)
-        print(f'[DB] 写入数据库: {len(result)} 条')
-        print("----------------------------------------")
-        print("[OK] 爬虫 农业农村部政府信息公开 执行成功")
-        return result
-    except Exception as e:
-        print(f'[ERROR] 爬虫 农业农村部政府信息公开 运行失败 - {e}')
-        print("----------------------------------------")
-        return []
+def create_runner(config):
+    def runner():
+        try:
+            data, _ = scrape_single_config(config)
+            result = save_to_supabase(data, config['name'])
+            print(f'[DB] 写入数据库: {len(result)} 条')
+            print("----------------------------------------")
+            print(f"[OK] 爬虫 {config['name']} 执行成功")
+            return result
+        except Exception as e:
+            print(f'[ERROR] 爬虫 {config["name"]} 运行失败 - {e}')
+            print("----------------------------------------")
+            return []
+    return runner
+
+
+for config in CRAWLER_CONFIGS:
+    fn_name = f"run_{config['name'].replace(' ', '_').replace('/', '_')}"
+    globals()[fn_name] = create_runner(config)
 
 
 if __name__ == "__main__":
-    run()
+    for config in CRAWLER_CONFIGS:
+        print(f"\n{'='*60}")
+        print(f"测试爬虫: {config['name']}")
+        print(f"{'='*60}")
+        policies, all_items = scrape_single_config(config)
+        if all_items:
+            print('[INFO] 页面最新5条是：')
+            for i, item in enumerate(all_items[:5], 1):
+                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
+                print(f'  {i}. {item["title"][:60]}... {date_str}')
