@@ -896,6 +896,48 @@ if __name__ == "__main__":
         manager.register_crawler("国家药品监督管理局_法规文件", nmpa_fgwj_crawler.run, nmpa_fgwj_crawler)
     except ImportError as e:
         print(f"⚠️  导入国家药品监督管理局爬虫失败: {e}")
+
+    # 导入国家消防救援局政务公开爬虫
+    try:
+        from Ministries import fire_zfxxgk_crawler
+        manager.register_crawler("国家消防救援局_政务公开", fire_zfxxgk_crawler.run, fire_zfxxgk_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入国家消防救援局政务公开爬虫失败: {e}")
+
+    # 导入国家疾控局政策法规爬虫
+    try:
+        from Ministries import ndcpa_zcfg_crawler
+        manager.register_crawler("国家疾控局_政策法规", ndcpa_zcfg_crawler.run, ndcpa_zcfg_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入国家疾控局政策法规爬虫失败: {e}")
+
+    # 导入国家疾控局通知公告爬虫
+    try:
+        from Ministries import ndcpa_tzgg_crawler
+        manager.register_crawler("国家疾控局_通知公告", ndcpa_tzgg_crawler.run, ndcpa_tzgg_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入国家疾控局通知公告爬虫失败: {e}")
+
+    # 导入最高人民法院发布爬虫
+    try:
+        from Ministries import court_fabu_crawler
+        manager.register_crawler("最高人民法院_发布", court_fabu_crawler.run, court_fabu_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入最高人民法院发布爬虫失败: {e}")
+
+    # 导入最高人民检察院法规规范爬虫
+    try:
+        from Ministries import spp_flfh_crawler
+        manager.register_crawler("最高人民检察院_法规规范", spp_flfh_crawler.run, spp_flfh_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入最高人民检察院法规规范爬虫失败: {e}")
+
+    # 导入国家能源局最新文件爬虫
+    try:
+        from Ministries import nea_zxwj_crawler
+        manager.register_crawler("国家能源局_最新文件", nea_zxwj_crawler.run, nea_zxwj_crawler)
+    except ImportError as e:
+        print(f"⚠️  导入国家能源局最新文件爬虫失败: {e}")
         
     # 执行所有爬虫
     if manager.crawlers:
