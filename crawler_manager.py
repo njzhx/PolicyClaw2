@@ -204,11 +204,13 @@ class CrawlerManager:
         for crawler_name, result in self.results.items():
             if 'api_push_result' in result and result['api_push_result']:
                 api_result = result['api_push_result']
-                api_results.append((crawler_name, api_result))
-                if api_result.get('status') == 'success':
-                    api_success_count += 1
-                else:
-                    api_error_count += 1
+                # 确保 api_result 是字典类型，某些爬虫可能返回特殊格式
+                if isinstance(api_result, dict):
+                    api_results.append((crawler_name, api_result))
+                    if api_result.get('status') == 'success':
+                        api_success_count += 1
+                    else:
+                        api_error_count += 1
         
         # 恢复标准输出
         sys.stdout = original_stdout

@@ -199,7 +199,8 @@ class FeishuNotifier:
         for name, result in results.items():
             if result.get('status') == 'success' and 'api_push_result' in result:
                 api_result = result.get('api_push_result')
-                if api_result:
+                # 确保 api_result 是字典类型，某些爬虫可能返回特殊格式
+                if api_result and isinstance(api_result, dict):
                     api_results_added = True
                     status = api_result.get('status', 'unknown')
                     message = api_result.get('message', '')
