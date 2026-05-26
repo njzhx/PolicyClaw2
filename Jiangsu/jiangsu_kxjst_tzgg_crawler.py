@@ -17,27 +17,51 @@ headers = {
 }
 
 def extract_pdf_text(pdf_url):
-    """从PDF链接提取文字内容"""
+    """从PDF链接提取文字内容（支持pdfplumber和pypdf双引擎）"""
+    pdf_text = ""
+    
+    # 先尝试请求PDF内容
     try:
-        import pdfplumber
         pdf_resp = requests.get(pdf_url, headers=headers, timeout=60)
         if len(pdf_resp.content) < 100:
             return ""
-        
+    except Exception as e:
+        print(f"PDF download failed: {str(e)[:30]}")
+        return ""
+    
+    # 引擎1: pdfplumber (优先)
+    try:
+        import pdfplumber
         with io.BytesIO(pdf_resp.content) as data:
-            try:
-                with pdfplumber.open(data) as pdf:
-                    pdf_text = ""
-                    for page in pdf.pages:
-                        page_text = page.extract_text() or ""
-                        pdf_text += page_text + "\n"
+            with pdfplumber.open(data) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text() or ""
+                    pdf_text += page_text + "\n"
+                if len(pdf_text.strip()) > 50:
+                    print(f"[PDF] pdfplumber: {len(pdf_text.strip())} chars")
                     return pdf_text.strip()
-            except Exception:
-                return ""
     except ImportError:
-        return ""
-    except Exception:
-        return ""
+        print("[PDF] pdfplumber not installed, try pypdf...")
+    except Exception as e:
+        print(f"[PDF] pdfplumber failed: {type(e).__name__}: {str(e)[:30]}")
+    
+    # 引擎2: pypdf (备选)
+    try:
+        from pypdf import PdfReader
+        pdf_text2 = ""
+        with io.BytesIO(pdf_resp.content) as data:
+            reader = PdfReader(data)
+            for page in reader.pages:
+                pdf_text2 += page.extract_text() or ""
+            if len(pdf_text2.strip()) > 50:
+                print(f"[PDF] pypdf: {len(pdf_text2.strip())} chars")
+                return pdf_text2.strip()
+    except ImportError:
+        print("[PDF] pypdf also not installed!")
+    except Exception as e:
+        print(f"[PDF] pypdf failed: {type(e).__name__}: {str(e)[:30]}")
+    
+    return pdf_text.strip() if len(pdf_text.strip()) > 50 else ""
 
 # ==========================================
 # 1. 网页抓取逻辑
@@ -124,6 +148,8 @@ def scrape_data():
                     if text and len(text) > 5 and '点击正文' not in text:
                         p_content.append(text)
                 content = "\n".join(p_content)
+                if content:
+                    print(f"[p-tag] {len(content)} chars")
                 
                 # 2. 查找PDF附件并提取文字（优先）
                 all_links = ds.find_all('a', href=True)
@@ -153,8 +179,10 @@ def scrape_data():
                             content = pdf_text
                             break
                 
+                print(f"[CONTENT] Final: {len(content)} chars")
+                
             except Exception as e:
-                print(f"⚠️  抓取详情或PDF失败：{title[:20]}... | {str(e)[:40]}")
+                print(f"Detail fetch failed: {title[:20]} | {str(e)[:40]}")
             
             policy_data = {
                 'title': title,

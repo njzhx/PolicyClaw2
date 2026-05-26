@@ -5,3 +5,5 @@ selenium
 webdriver-manager
 dnspython
 crawl4ai
+pdfplumber
+pypdf
