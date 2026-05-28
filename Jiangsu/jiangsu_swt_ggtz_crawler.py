@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -15,44 +17,43 @@ TARGET_URL = "https://doc.jiangsu.gov.cn/col/col78712/index.html"
 def scrape_data():
     policies = []
     all_items = []
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+
         # 发送请求获取页面内容
         response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
-        
+
         # 解析页面
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         # 查找文章列表
         article_list = soup.select('.listcon .list')
-        
+
         # 如果没有找到文章，尝试其他选择器
         if not article_list:
             article_list = soup.select('.article-list .article-item')
-            
+
             if not article_list:
                 article_list = soup.select('ul li')
-        
+
         filtered_count = 0
-        
+
         for article in article_list:
             try:
                 # 提取标题和链接
                 title_elem = article.select_one('a')
                 if not title_elem:
                     continue
-                
+
                 title = title_elem.get_text(strip=True)
                 url = title_elem.get('href')
-                
+
                 if not title or len(title) < 5:
                     continue
-                
+
                 # 构建完整的文章 URL
                 if url.startswith('/'):
                     article_url = "https://doc.jiangsu.gov.cn" + url
@@ -60,7 +61,7 @@ def scrape_data():
                     article_url = "https://doc.jiangsu.gov.cn" + url
                 else:
                     article_url = url
-                
+
                 # 提取发布时间
                 pub_at = None
                 # 尝试不同的日期元素选择器
@@ -78,7 +79,7 @@ def scrape_data():
                                 continue
                     except Exception:
                         pass
-                
+
                 # 如果还是没有日期，尝试从标题中提取
                 if not pub_at:
                     date_pattern = r'20\d{2}[-年]\d{2}[-月]\d{2}日?'
@@ -91,7 +92,7 @@ def scrape_data():
                             pub_at = datetime.strptime(date_str, '%Y-%m-%d').date()
                         except Exception:
                             pass
-                
+
                 # 如果还是没有日期，尝试从URL中提取
                 if not pub_at:
                     url_date_pattern = r'art/(20\d{2})/(\d{1,2})/(\d{1,2})/'
@@ -102,23 +103,23 @@ def scrape_data():
                             pub_at = datetime(int(year), int(month), int(day)).date()
                         except Exception:
                             pass
-                
+
                 # 保存到 all_items 用于显示最新5条
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 # 获取文章内容
                 content = ""
                 try:
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-                    
+
                     # 尝试多种选择器获取内容
                     content_elem = detail_soup.select_one('div[aria-label="正文区"]')
-                    
+
                     # 尝试常见的内容选择器
                     selectors = [
                         '.main.w1200',
@@ -138,18 +139,18 @@ def scrape_data():
                         '.content-main',
                         '.main-content-area'
                     ]
-                    
+
                     if not content_elem:
                         for selector in selectors:
                             content_elem = detail_soup.select_one(selector)
                             if content_elem:
                                 break
-                    
+
                     if content_elem:
                         content = content_elem.get_text(strip=True)
                 except Exception:
                     pass
-                
+
                 policy_data = {
                     'title': title,
                     'url': article_url,
@@ -160,24 +161,24 @@ def scrape_data():
                     'source': '江苏省商务厅'
                 }
                 policies.append(policy_data)
-                
+
             except Exception:
                 continue
-        
-        print(f"✅ 江苏省商务厅公告通知爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"✅ 江苏省商务厅公告通知爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         # 显示页面最新5条
         if all_items:
             print("📊 页面最新5条是：")
             for i, item in enumerate(all_items[:5], 1):
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 print(f"✅ {item['title']} {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 江苏省商务厅公告通知爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 

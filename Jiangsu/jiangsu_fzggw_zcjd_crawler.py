@@ -2,6 +2,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -15,30 +17,29 @@ def scrape_data():
     policies = []
     all_items = []
     url = TARGET_URL
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         # 从XML脚本中提取数据
         script_tags = soup.find_all('script', type='text/xml')
         filtered_count = 0
-        
+
         for script in script_tags:
             try:
                 xml_content = script.string
                 if not xml_content:
                     continue
-                
+
                 # 提取record标签内容
                 import re
                 records = re.findall(r'<record><!\[CDATA\[(.*?)\]\]></record>', xml_content, re.DOTALL)
-                
+
                 for record in records:
                     try:
                         # 解析每条记录的HTML
@@ -46,24 +47,24 @@ def scrape_data():
                         li_tag = record_soup.find('li')
                         if not li_tag:
                             continue
-                        
+
                         a_tag = li_tag.find('a')
                         if not a_tag:
                             continue
-                        
+
                         title = a_tag.get('title', '').strip() or a_tag.get_text(strip=True)
                         href = a_tag.get('href', '')
-                        
+
                         if not title or len(title) < 5:
                             continue
-                        
+
                         if href.startswith('/'):
                             article_url = "https://fzggw.jiangsu.gov.cn" + href
                         elif not href.startswith('http'):
                             article_url = "https://fzggw.jiangsu.gov.cn/col/col314/" + href
                         else:
                             article_url = href
-                        
+
                         pub_at = None
                         time_span = li_tag.find('span', class_='bt-list-time')
                         if time_span:
@@ -74,14 +75,14 @@ def scrape_data():
                                     pub_at = datetime.strptime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", '%Y-%m-%d').date()
                                 except ValueError:
                                     pass
-                        
+
                         # 保存到 all_items 用于显示最新5条
                         all_items.append({'title': title, 'pub_at': pub_at})
-                        
-                        if pub_at != yesterday:
+
+                        if not is_target_date(pub_at, target_date_from, target_date_to):
                             filtered_count += 1
                             continue
-                        
+
                         content = ""
                         try:
                             detail_resp = requests.get(article_url, headers=headers, timeout=15)
@@ -91,7 +92,7 @@ def scrape_data():
                                 content = content_elem.get_text(strip=True)
                         except Exception:
                             pass
-                        
+
                         policy_data = {
                             'title': title,
                             'url': article_url,
@@ -102,16 +103,16 @@ def scrape_data():
                             'source': '江苏省发改委'
                         }
                         policies.append(policy_data)
-                        
+
                     except Exception:
                         continue
             except Exception:
                 continue
-        
-        print(f"🎯 目标抓取日期：{yesterday}")
-        print(f"✅ 江苏省发改委爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"🎯 目标抓取日期：{target_date_label}")
+        print(f"✅ 江苏省发改委爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         # 显示页面最新5条
         if all_items:
             print("📊 页面最新5条是：")
@@ -122,11 +123,11 @@ def scrape_data():
                 if len(title) > 10:
                     title = title[:10] + "..."
                 print(f"✅ {title} {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 江苏省发改委爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 

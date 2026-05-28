@@ -2,6 +2,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -17,9 +19,8 @@ def scrape_data():
     url = TARGET_URL
 
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
 
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
@@ -97,7 +98,7 @@ def scrape_data():
                 all_items.append({'title': title, 'pub_at': pub_at})
 
                 # 过滤非目标日期
-                if pub_at != yesterday:
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
 
@@ -150,7 +151,7 @@ def scrape_data():
             except Exception:
                 continue
 
-        print(f'[OK] 江苏省民宗委通知公告爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 江苏省民宗委通知公告爬虫：成功抓取 {len(policies)} 条目标日期窗口数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
         # 显示页面最新5条

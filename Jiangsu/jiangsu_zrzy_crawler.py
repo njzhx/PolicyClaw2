@@ -2,6 +2,8 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 目标网站URL
@@ -15,15 +17,15 @@ def scrape_data():
     """抓取数据，返回与表结构一致的字典列表"""
     policies = []
     all_items = 0
-    
+
     try:
-        # 计算前一天日期（使用北京时间 UTC+8）
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        # 计算目标日期窗口日期（使用北京时间 UTC+8）
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
         print(f"运行日期（北京时间）：{today}")
-        print(f"目标抓取日期：{yesterday}")
-        
+        print(f"目标抓取日期：{target_date_label}")
+
         # 请求头
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -31,24 +33,24 @@ def scrape_data():
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Connection': 'keep-alive'
         }
-        
+
         # 请求页面
         response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         # 查找政策文件列表
         # 分析页面结构，找到包含政策文件的容器
         # 根据用户提示，文章列表在 //*[contains(@class, "loat")]/div[1] 里
-        
+
         # 尝试找到包含政策文件的列表
         policy_links = []
-        
+
         # 使用BeautifulSoup查找包含政策文件的容器
         # 查找class包含"loat"的元素
         float_containers = soup.find_all(class_=lambda x: x and 'loat' in x)
-        
+
         if float_containers:
             # 获取第一个div子元素
             article_container = float_containers[0].find('div')
@@ -61,7 +63,7 @@ def scrape_data():
                         # 即使包含nrglIndex.action，也添加到政策链接中
                         # 后续会处理这些链接
                         policy_links.append((text, href))
-        
+
         # 如果通过float容器没有找到，回退到原来的方法
         if not policy_links:
             # 查找所有链接，筛选出政策文件链接
@@ -72,42 +74,42 @@ def scrape_data():
                     # 检查链接是否是政策文件详情页
                     if 'nrglIndex.action' not in href and 'classID' not in href:
                         policy_links.append((text, href))
-        
+
         all_items = len(policy_links)
         print(f"找到 {all_items} 条政策文件")
-        
+
         target_date_items = 0
         non_target_date_items = 0
-        
+
         for title, href in policy_links:
             # 从标题中提取日期
             date_match = re.search(r'(\d{4}-\d{2}-\d{2})', title)
-            
+
             if not date_match:
                 # 如果标题中没有日期，可能日期在其他位置
                 # 尝试从页面中查找日期信息
                 # 这里需要根据实际页面结构调整
                 non_target_date_items += 1
                 continue
-            
+
             date_str = date_match.group(1)
-            
+
             # 解析日期
             try:
                 pub_at = datetime.strptime(date_str, '%Y-%m-%d').date()
             except Exception:
                 non_target_date_items += 1
                 continue
-            
-            # 只保留昨天的
-            if pub_at != yesterday:
+
+            # 只保留目标日期窗口的
+            if not is_target_date(pub_at, target_date_from, target_date_to):
                 non_target_date_items += 1
                 continue
-            
+
             # 处理URL
             if not href.startswith('http'):
                 href = f"https://zrzy.jiangsu.gov.cn{href}" if href.startswith('/') else f"https://zrzy.jiangsu.gov.cn/{href}"
-            
+
             # 抓取正文
             content = ""
             try:
@@ -115,7 +117,7 @@ def scrape_data():
                 resp.raise_for_status()
                 resp.encoding = resp.apparent_encoding
                 ds = BeautifulSoup(resp.text, 'html.parser')
-                
+
                 # 兼容常见内容容器
                 content_elem = ds.select_one('.content') or ds.select_one('.main-content') or ds.select_one('.article-content')
                 if content_elem:
@@ -126,7 +128,7 @@ def scrape_data():
                     content = re.sub(r'来源：.*?$|浏览次数：.*?$', '', content, flags=re.MULTILINE).strip()
             except Exception as e:
                 print(f"抓取详情失败：{href} | {e}")
-            
+
             policy_data = {
                 'title': title,
                 'url': href,
@@ -138,10 +140,10 @@ def scrape_data():
             }
             policies.append(policy_data)
             target_date_items += 1
-        
-        print(f"成功抓取昨日数据：{target_date_items} 条")
-        print(f"过滤非昨日数据：{non_target_date_items} 条")
-        
+
+        print(f"成功抓取目标日期窗口数据：{target_date_items} 条")
+        print(f"过滤非目标日期窗口数据：{non_target_date_items} 条")
+
         # 显示实际的文件标题
         print("\n页面最新5条政策文件标题：")
         for i, (title, href) in enumerate(policy_links[:5]):
@@ -155,10 +157,10 @@ def scrape_data():
                 except Exception:
                     # 如果仍然失败，只打印标题长度
                     print("第{}条: 标题长度 {}".format(i+1, len(title)))
-        
+
     except Exception as e:
         print(f"抓取失败：{e}")
-    
+
     return policies, all_items
 
 # ==========================================
@@ -183,7 +185,7 @@ def run():
             return result
         else:
             print("\n写入数据库：0 条")
-            print("未找到昨日发布的政策文件")
+            print("未找到目标日期窗口发布的政策文件")
             return []
     except Exception as e:
         print(f"爬虫运行失败：{e}")

@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -17,12 +19,12 @@ def scrape_data():
     all_items = []
 
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
 
         print(f"[INFO] 运行日期（北京时间）：{today}")
-        print(f"[INFO] 目标抓取日期：{yesterday}")
+        print(f"[INFO] 目标抓取日期：{target_date_label}")
 
         print("正在获取页面列表...")
         response = requests.get(TARGET_URL, headers=headers, timeout=30)
@@ -78,7 +80,7 @@ def scrape_data():
 
                     all_items.append({'title': title, 'pub_at': pub_at})
 
-                    if pub_at != yesterday:
+                    if not is_target_date(pub_at, target_date_from, target_date_to):
                         filtered_count += 1
                         continue
 
@@ -115,7 +117,7 @@ def scrape_data():
                     print(f"[WARN] 单条数据处理失败 - {e}")
                     continue
 
-        print(f"\n[OK] 财政部通知公告爬虫：成功抓取 {len(policies)} 条前一天数据")
+        print(f"\n[OK] 财政部通知公告爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据")
 
         if all_items:

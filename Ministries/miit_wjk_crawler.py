@@ -2,6 +2,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 import time
 
@@ -34,25 +36,23 @@ def scrape_data():
     policies = []
     all_items = []
     url = TARGET_URL
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        # 使用前一天的日期
-        yesterday = today - timedelta(days=1)
-        # yesterday = datetime(2026, 2, 24).date()  # 测试有数据的日期
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
+
         filtered_count = 0
-        
+
         # 1. 先获取分类信息
         category_api_url = "https://www.miit.gov.cn/search-front-server/api/structure/list-category"
         category_params = {
             "websiteid": "110000000000000",
             "searchid": "183"  # 从URL参数获取的category值
         }
-        
+
         category_response = requests.get(category_api_url, params=category_params, headers=headers, timeout=30)
-        
+
         cateid = "183"  # 默认值
         if category_response.status_code == 200:
             try:
@@ -63,10 +63,10 @@ def scrape_data():
                         cateid = categories[0].get('iid', '183')
             except Exception:
                 pass
-        
+
         # 2. 使用正确的分类ID进行搜索
         api_url = "https://www.miit.gov.cn/search-front-server/api/search/info"
-        
+
         # 构建查询参数 - 基于search.js的分析
         # 不设置日期限制，获取所有数据后在本地筛选
         params = {
@@ -89,23 +89,23 @@ def scrape_data():
             "level": 6,
             "sortFields": "[{\"name\":\"deploytime\",\"type\":\"desc\"}]"
         }
-        
+
         # 移除Content-Type头，使用默认的GET请求
         if 'Content-Type' in headers:
             del headers['Content-Type']
         response = requests.get(api_url, params=params, headers=headers, timeout=30)
-        
+
         if response.status_code == 200:
             try:
                 data = response.json()
-                
+
                 # 处理API响应
                 if data and 'data' in data and 'searchResult' in data['data']:
                     search_result = data['data']['searchResult']
-                    
+
                     if 'dataResults' in search_result and search_result['dataResults']:
                         data_results = search_result['dataResults']
-                        
+
                         for result in data_results:
                             try:
                                 # 处理结果数据
@@ -113,23 +113,23 @@ def scrape_data():
                                     group_data = result['groupData'][0]['data']
                                 else:
                                     group_data = result['data']
-                                
+
                                 title = group_data.get('title', '') or group_data.get('title_text', '')
                                 url = group_data.get('url', '')
                                 deploytime = group_data.get('deploytime', '')
-                                
+
                                 if not title or not url:
                                     continue
-                                
+
                                 # 构建完整URL
                                 if url.startswith('/'):
                                     article_url = "https://www.miit.gov.cn" + url
                                 else:
                                     article_url = url
-                                
+
                                 # 解析日期
                                 pub_at = None
-                                
+
                                 # 优先使用jsearch_date字段（已经是字符串格式）
                                 if 'jsearch_date' in group_data:
                                     jsearch_date = group_data.get('jsearch_date', '')
@@ -138,7 +138,7 @@ def scrape_data():
                                             pub_at = datetime.strptime(jsearch_date, '%Y-%m-%d').date()
                                         except ValueError:
                                             pass
-                                
+
                                 # 如果没有jsearch_date，尝试解析时间戳格式的日期
                                 if not pub_at and deploytime:
                                     try:
@@ -149,7 +149,7 @@ def scrape_data():
                                             pub_at = datetime.fromtimestamp(timestamp, tz=timezone(timedelta(hours=8))).date()
                                     except (ValueError, TypeError):
                                         pass
-                                
+
                                 # 尝试其他日期字段
                                 if not pub_at:
                                     # 尝试cdate字段
@@ -160,14 +160,14 @@ def scrape_data():
                                             pub_at = datetime.fromtimestamp(timestamp, tz=timezone(timedelta(hours=8))).date()
                                         except (ValueError, TypeError):
                                             pass
-                                
+
                                 # 保存到 all_items 用于显示最新5条
                                 all_items.append({'title': title, 'pub_at': pub_at})
-                                
-                                if pub_at != yesterday:
+
+                                if not is_target_date(pub_at, target_date_from, target_date_to):
                                     filtered_count += 1
                                     continue
-                                
+
                                 # 抓取内容
                                 content = ""
                                 try:
@@ -179,7 +179,7 @@ def scrape_data():
                                         content = content_elem.get_text(strip=True)
                                 except Exception:
                                     pass
-                                
+
                                 policy_data = {
                                     'title': title,
                                     'url': article_url,
@@ -190,17 +190,17 @@ def scrape_data():
                                     'source': '工信部'
                                 }
                                 policies.append(policy_data)
-                                
+
                             except Exception:
                                 continue
             except Exception:
                 pass
-        
+
         # 显示结果
-        print(f"🎯 目标抓取日期：{yesterday}")
-        print(f"✅ 工信部爬虫：成功抓取 {len(policies)} 条前一天数据")
+        print(f"🎯 目标抓取日期：{target_date_label}")
+        print(f"✅ 工信部爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         # 显示页面最新5条
         if all_items:
             print("📊 页面最新5条是：")
@@ -211,11 +211,11 @@ def scrape_data():
                 if len(title) > 10:
                     title = title[:10] + "..."
                 print(f"✅ {title} {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 工信部爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 
@@ -249,30 +249,30 @@ def run_test():
     print("=" * 60)
     print("🧪 Testing MIIT File Library Crawler")
     print("=" * 60)
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
         print(f"Date (Beijing): {today}")
-        print(f"Target date: {yesterday}")
-        
+        print(f"Target date: {target_date_label}")
+
         # 测试直接搜索URL
-        search_url = f"https://www.miit.gov.cn/search/zcwjk.html?websiteid=110000000000000&pg=10&p=1&tpl=14&category=183&q=&begin={yesterday}&end={yesterday}"
+        search_url = f"https://www.miit.gov.cn/search/zcwjk.html?websiteid=110000000000000&pg=10&p=1&tpl=14&category=183&q=&begin={target_date_label}&end={target_date_label}"
         print(f"Testing search URL: {search_url}")
-        
+
         response = requests.get(search_url, headers=headers, timeout=30)
         print(f"Response status: {response.status_code}")
-        
+
         if response.status_code == 200:
             # 保存整个页面
             with open('miit_full_page.html', 'w', encoding='utf-8') as f:
                 f.write(response.text)
             print("Saved full page to miit_full_page.html")
-            
+
             soup = BeautifulSoup(response.content, 'html.parser')
             print(f"Page title: {soup.title.string}")
-            
+
             # 查找搜索结果
             search_content = soup.find('div', class_='search-conent')
             if search_content:
@@ -283,7 +283,7 @@ def run_test():
                 print("Saved search content to miit_search_result.html")
             else:
                 print("No search content found")
-        
+
     except Exception as e:
         print(f"Test failed: {e}")
 

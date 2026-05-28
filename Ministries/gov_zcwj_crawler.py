@@ -2,6 +2,8 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -27,20 +29,20 @@ CATEGORY_MAP = {
 
 def get_api_session():
     session = requests.Session()
-    
+
     main_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     }
-    
+
     session.get(TARGET_URL, headers=main_headers, timeout=30)
-    
+
     for cookie in API_COOKIES.split('; '):
         if '=' in cookie:
             name, value = cookie.split('=', 1)
             session.cookies.set(name.strip(), value.strip())
-    
+
     return session
 
 
@@ -58,18 +60,18 @@ def scrape_with_api():
         data = response.json()
         searchVO = data.get('searchVO', {})
         catMap = searchVO.get('catMap', {})
-        
+
         all_items = []
-        
+
         for catKey, catData in catMap.items():
             catName = CATEGORY_MAP.get(catKey, catKey)
             listVO = catData.get('listVO', [])
-            
+
             for item in listVO:
                 title_raw = item.get('title', '')
                 title = re.sub(r'</?em>', '', title_raw)
                 title = re.sub(r'<br\s*/?>', ' ', title)
-                
+
                 date_str = item.get('pubtimeStr', '')
                 pub_at = None
                 if date_str:
@@ -77,13 +79,13 @@ def scrape_with_api():
                         pub_at = datetime.strptime(date_str, '%Y.%m.%d').date()
                     except ValueError:
                         pass
-                
+
                 pcode = item.get('pcode', '')
                 url = item.get('sourcelink', item.get('url', ''))
-                
+
                 if not url:
                     continue
-                
+
                 all_items.append({
                     'title': title,
                     'url': url,
@@ -91,7 +93,7 @@ def scrape_with_api():
                     'category': catName,
                     'pcode': pcode
                 })
-        
+
         return all_items
     except Exception as e:
         print(f"⚠️  API获取数据失败：{e}")
@@ -103,45 +105,45 @@ def scrape_with_api():
 def scrape_data():
     policies = []
     all_items = []
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
+
         print(f"📅 运行日期（北京时间）：{today}")
-        print(f"🎯 目标抓取日期：{yesterday}")
-        
+        print(f"🎯 目标抓取日期：{target_date_label}")
+
         print("正在从API获取数据...")
         all_items = scrape_with_api()
-        
+
         print(f"📋 API返回 {len(all_items)} 条数据")
-        
+
         filtered_count = 0
-        
+
         for item in all_items:
             try:
                 title = item.get('title', '')
                 href = item.get('url', '')
                 pub_at = item.get('pub_at')
                 category = item.get('category', '')
-                
+
                 if not title or not href:
                     continue
-                
+
                 if not href.startswith('http'):
                     href = f"https://sousuo.www.gov.cn{href}"
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 content = ""
                 try:
                     detail_resp = requests.get(href, headers=headers, timeout=15)
                     detail_resp.raise_for_status()
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-                    
+
                     content_table = detail_soup.find('table', class_='border-table noneBorder pages_content')
                     if content_table:
                         content = content_table.get_text(separator='\n', strip=True)
@@ -158,7 +160,7 @@ def scrape_data():
                             content = max_text
                 except Exception as e:
                     print(f"⚠️  抓取详情页失败：{e}")
-                
+
                 policy_data = {
                     'title': title,
                     'url': href,
@@ -168,16 +170,16 @@ def scrape_data():
                     'category': category,
                     'source': '国务院文件'
                 }
-                
+
                 policies.append(policy_data)
-                
+
             except Exception as e:
                 print(f"⚠️  单条数据处理失败 - {e}")
                 continue
-        
-        print(f"\n✅ 国务院文件爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"\n✅ 国务院文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         if all_items:
             print(f"\n📊 页面最新5条是：")
             sorted_items = sorted(all_items, key=lambda x: x['pub_at'] or datetime.min.date(), reverse=True)
@@ -185,11 +187,11 @@ def scrape_data():
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 title_clean = re.sub(r'\s+', ' ', item['title'])
                 print(f"✅ {title_clean[:50]}... {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 国务院文件爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 

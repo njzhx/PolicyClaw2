@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -21,20 +23,20 @@ def scrape_data():
     all_items = []
 
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
         print(f"[DATE] 运行日期（北京时间）：{today}")
-        print(f"[TARGET] 目标抓取日期：{yesterday}")
+        print(f"[TARGET] 目标抓取日期：{target_date_label}")
 
         session = requests.Session()
         session.headers.update(headers)
-        
+
         try:
             response = session.get("https://www.cma.gov.cn/", timeout=10)
         except:
             pass
-        
+
         response = session.get(TARGET_URL, timeout=30)
         response.raise_for_status()
         response.encoding = response.apparent_encoding
@@ -43,7 +45,7 @@ def scrape_data():
         ul_element = soup.find('ul', class_='mesgopen2')
         if not ul_element:
             ul_element = soup.find('ul', class_='list')
-        
+
         if not ul_element:
             print('[ERROR] 中国气象局爬虫：未找到列表 ul')
             return policies, all_items
@@ -51,7 +53,7 @@ def scrape_data():
         li_elements = ul_element.find_all('li', class_='list-item')
         if not li_elements:
             li_elements = ul_element.find_all('li')
-        
+
         if not li_elements:
             print('[ERROR] 中国气象局爬虫：列表为空')
             return policies, all_items
@@ -102,7 +104,7 @@ def scrape_data():
 
                 all_items.append({'title': title, 'pub_at': pub_at})
 
-                if pub_at != yesterday:
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
 
@@ -118,11 +120,11 @@ def scrape_data():
                         if iframe_src:
                             if not iframe_src.startswith('http'):
                                 iframe_src = "https://www.cma.gov.cn" + iframe_src
-                            
+
                             iframe_resp = session.get(iframe_src, timeout=15)
                             iframe_resp.encoding = iframe_resp.apparent_encoding
                             iframe_soup = BeautifulSoup(iframe_resp.content, 'html.parser')
-                            
+
                             content_elem = iframe_soup.find('body')
                             if content_elem:
                                 text = content_elem.get_text(separator='\n', strip=True)
@@ -133,7 +135,7 @@ def scrape_data():
                         content_elem = detail_soup.find('div', class_='content')
                         if not content_elem:
                             content_elem = detail_soup.find('body')
-                        
+
                         if content_elem:
                             text = content_elem.get_text(separator='\n', strip=True)
                             lines = [line.strip() for line in text.split('\n') if line.strip()]
@@ -162,7 +164,7 @@ def scrape_data():
             except Exception:
                 continue
 
-        print(f'[OK] 中国气象局爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 中国气象局爬虫：成功抓取 {len(policies)} 条目标日期窗口数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
         if all_items:

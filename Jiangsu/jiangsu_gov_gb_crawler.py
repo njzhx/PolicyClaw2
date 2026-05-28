@@ -2,6 +2,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -15,40 +17,39 @@ def scrape_data():
     policies = []
     all_items = []
     url = TARGET_URL
-    
-    try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
 
-        
+    try:
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+
+
+
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         items = soup.find_all('li')
         filtered_count = 0
-        
+
         for item in items:
             try:
                 a_tag = item.find('a')
                 if not a_tag:
                     continue
-                
+
                 title = a_tag.get('title', '').strip() or a_tag.get_text(strip=True)
                 href = a_tag.get('href', '')
-                
+
                 if not title or len(title) < 5:
                     continue
-                
+
                 if href.startswith('/'):
                     article_url = "https://www.jiangsu.gov.cn" + href
                 elif not href.startswith('http'):
                     article_url = "https://www.jiangsu.gov.cn/col/col81677/" + href
                 else:
                     article_url = href
-                
+
                 pub_at = None
                 date_text = item.get_text()
                 # 匹配 MM-DD 格式的日期
@@ -59,14 +60,14 @@ def scrape_data():
                         pub_at = datetime(2026, int(date_match.group(1)), int(date_match.group(2))).date()
                     except ValueError:
                         pass
-                
+
                 # 保存到 all_items 用于显示最新5条
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 content = ""
                 try:
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
@@ -76,7 +77,7 @@ def scrape_data():
                         content = content_elem.get_text(strip=True)
                 except Exception:
                     pass
-                
+
                 policy_data = {
                     'title': title,
                     'url': article_url,
@@ -87,24 +88,24 @@ def scrape_data():
                     'source': '江苏省政府公报'
                 }
                 policies.append(policy_data)
-                
+
             except Exception:
                 continue
-        
-        print(f"✅ 江苏省政府公报爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"✅ 江苏省政府公报爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         # 显示页面最新5条
         if all_items:
             print("📊 页面最新5条是：")
             for i, item in enumerate(all_items[:5], 1):
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 print(f"✅ {item['title']} {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 江苏省政府公报爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 

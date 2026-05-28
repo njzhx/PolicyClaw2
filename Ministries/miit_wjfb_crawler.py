@@ -2,6 +2,8 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 导入数据库工具
@@ -28,10 +30,10 @@ HEADERS = {
 # ==========================================
 def scrape_data():
     """抓取工信部信息通信管理局文件发布数据
-    
-    只抓取前一天发布的文章
+
+    只抓取目标日期窗口发布的文章
     例如：运行时是2026年3月4日，只抓取2026年3月3日的文章
-    
+
     Returns:
         tuple: (policies, all_items)
             - policies: 符合目标日期的数据列表
@@ -39,44 +41,44 @@ def scrape_data():
     """
     policies = []
     all_items = []
-    
+
     try:
-        # 计算前一天日期（使用北京时间 UTC+8）
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        # 计算目标日期窗口日期（使用北京时间 UTC+8）
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
+
         print(f"📅 运行日期（北京时间）：{today}")
-        print(f"🎯 目标抓取日期：{yesterday}")
-        
+        print(f"🎯 目标抓取日期：{target_date_label}")
+
         # 发送API请求
         response = requests.get(API_URL, headers=HEADERS, params=API_PARAMS, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         # 查找文章列表
         article_list = soup.find_all('li')
         print(f"📋 找到 {len(article_list)} 条数据")
-        
+
         filtered_count = 0
-        
+
         for article in article_list:
             try:
                 a_tag = article.find('a')
                 if not a_tag:
                     continue
-                
+
                 title = a_tag.get_text(strip=True)
                 href = a_tag.get('href')
                 date_span = article.find('span')
                 date_str = date_span.get_text(strip=True) if date_span else ''
-                
+
                 if not title or not href:
                     continue
-                
+
                 # 清理链接
                 href = href.replace('"', '')
-                
+
                 # 构建完整URL
                 if href.startswith('/'):
                     article_url = f"https://wap.miit.gov.cn{href}"
@@ -84,7 +86,7 @@ def scrape_data():
                     article_url = f"https://wap.miit.gov.cn{href}"
                 else:
                     article_url = href
-                
+
                 # 解析日期
                 pub_at = None
                 if date_str:
@@ -92,22 +94,22 @@ def scrape_data():
                         pub_at = datetime.strptime(date_str, '%Y-%m-%d').date()
                     except ValueError:
                         pass
-                
+
                 # 保存到 all_items 用于显示最新5条
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
+
                 # 过滤：只保留目标日期的文章
-                if pub_at != yesterday:
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 # 抓取详情页内容
                 content = ""
                 try:
                     detail_resp = requests.get(article_url, headers=HEADERS, timeout=15)
                     detail_resp.raise_for_status()
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-                    
+
                     # 查找内容区域
                     content_div = None
                     divs = detail_soup.find_all('div')
@@ -116,12 +118,12 @@ def scrape_data():
                         if text and len(text) > 500:
                             content_div = div
                             break
-                    
+
                     if content_div:
                         content = content_div.get_text(strip=True)
                 except Exception as e:
                     print(f"⚠️  抓取详情页失败：{e}")
-                
+
                 # 构建政策数据
                 policy_data = {
                     'title': title,
@@ -132,27 +134,27 @@ def scrape_data():
                     'category': '',
                     'source': '工信部信息通信管理局文件发布'
                 }
-                
+
                 policies.append(policy_data)
-                
+
             except Exception as e:
                 print(f"⚠️  单条数据处理失败 - {e}")
                 continue
-        
-        print(f"\n✅ 工信部信息通信管理局文件发布爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"\n✅ 工信部信息通信管理局文件发布爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         # 显示页面最新5条
         if all_items:
             print("\n📊 页面最新5条是：")
             for i, item in enumerate(all_items[:5], 1):
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 print(f"✅ {item['title'][:50]}... {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 工信部信息通信管理局文件发布爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 # ==========================================
@@ -160,7 +162,7 @@ def scrape_data():
 # ==========================================
 def save_to_supabase(data_list):
     """保存数据到数据库
-    
+
     使用统一的数据库工具函数
     """
     return save_to_policy(data_list, "工信部信息通信管理局文件发布")

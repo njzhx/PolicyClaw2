@@ -2,6 +2,8 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 目标网站URL
@@ -15,13 +17,12 @@ def scrape_data():
     """抓取数据，返回与表结构一致的字典列表"""
     policies = []
     all_items = 0
-    
+
     try:
-        # 计算前一天日期（使用北京时间 UTC+8）
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        # 计算目标日期窗口日期（使用北京时间 UTC+8）
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+
         # 发送请求
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -31,10 +32,10 @@ def scrape_data():
         }
         response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
-        
+
         # 解析HTML
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         # 查找datastore脚本标签
         datastore_script = None
         scripts = soup.find_all('script')
@@ -42,51 +43,51 @@ def scrape_data():
             if script.string and '<datastore>' in script.string:
                 datastore_script = script.string
                 break
-        
+
         if not datastore_script:
             print("❌ 未找到datastore脚本标签")
             return policies, all_items
-        
+
         # 提取recordset内容
         recordset_match = re.search(r'<recordset>([\s\S]*?)</recordset>', datastore_script)
         if not recordset_match:
             print("❌ 未找到recordset")
             return policies, all_items
-        
+
         recordset_content = recordset_match.group(1)
-        
+
         # 提取所有record
         records = re.findall(r'<record><!\[CDATA\[(.*?)\]\]></record>', recordset_content, re.DOTALL)
         all_items = len(records)
-        
+
         print(f"📋 找到 {all_items} 篇文章")
         print(f"📅 有日期的文章: {all_items} 篇")
-        
+
         target_date_items = 0
         non_target_date_items = 0
-        
+
         # 遍历记录
         for record in records:
             # 提取标题、URL和日期
             title_match = re.search(r'title=(["\'])(.*?)\1', record)
             url_match = re.search(r'href=(["\'])(.*?)\1', record)
             date_match = re.search(r'\[(\d{4}-\d{2}-\d{2})\]', record)
-            
+
             if not all([title_match, url_match, date_match]):
                 continue
-            
+
             title = title_match.group(2)
             url = url_match.group(2)
             date_str = date_match.group(1)
-            
+
             # 解析日期
             try:
                 pub_at = datetime.strptime(date_str, '%Y-%m-%d').date()
             except Exception:
                 continue
-            
+
             # 检查是否为目标日期
-            if pub_at == yesterday:
+            if is_target_date(pub_at, target_date_from, target_date_to):
                 target_date_items += 1
                 # 处理URL
                 if not url.startswith('http'):
@@ -94,7 +95,7 @@ def scrape_data():
                         url = f"https://nynct.jiangsu.gov.cn{url}"
                     else:
                         url = f"https://nynct.jiangsu.gov.cn/{url}"
-                
+
                 # 抓取详情页内容
                 content = ""
                 try:
@@ -109,7 +110,7 @@ def scrape_data():
                         content = re.sub(r'来源：.*$', '', content, flags=re.DOTALL)
                 except Exception as e:
                     print(f"⚠️  抓取详情页失败：{url} - {e}")
-                
+
                 policy_data = {
                     'title': title,
                     'url': url,
@@ -122,10 +123,10 @@ def scrape_data():
                 policies.append(policy_data)
             else:
                 non_target_date_items += 1
-        
-        print(f"✅ 江苏省农业农村厅通知公告爬虫：成功抓取 {target_date_items} 条前一天数据")
+
+        print(f"✅ 江苏省农业农村厅通知公告爬虫：成功抓取 {target_date_items} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {non_target_date_items} 条非目标日期的数据")
-        
+
         # 收集所有文章信息用于显示最新5条
         all_articles = []
         for record in records:
@@ -136,14 +137,14 @@ def scrape_data():
                 title = title_match.group(2)
                 date_str = date_match.group(1)
                 all_articles.append((title, date_str))
-        
+
         print("📊 页面最新5条是：")
         for i, (title, date_str) in enumerate(all_articles[:5]):
             print(f"✅ {title} {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 爬虫：抓取失败 - {e}")
-    
+
     return policies, all_items
 
 # ==========================================

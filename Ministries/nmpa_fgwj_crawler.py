@@ -4,6 +4,8 @@ import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+
 from bs4 import BeautifulSoup
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,14 +18,14 @@ def scrape_data():
     policies = []
     url = TARGET_URL
     all_items = []
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
         print("[" + "日期" + "] 运行日期（北京时间）：" + str(today))
-        print("[" + "目标" + "] 目标抓取日期：" + str(yesterday))
-        
+        print("[" + "目标" + "] 目标抓取日期：" + target_date_label)
+
         cmd = [
             'curl',
             '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -36,25 +38,25 @@ def scrape_data():
             '--cookie-jar', 'cookies.txt',
             url
         ]
-        
+
         print("[" + "调试" + "] 执行curl命令")
         result = subprocess.run(cmd, capture_output=True, timeout=60)
-        
+
         if result.returncode != 0:
             print("[" + "失败" + "] curl执行失败: " + result.stderr.decode('utf-8', errors='ignore'))
             return policies, all_items
-        
+
         page_content = result.stdout.decode('utf-8', errors='ignore')
         print("[" + "调试" + "] 页面内容长度: " + str(len(page_content)))
-        
+
         if len(page_content) < 100:
             print("[" + "警告" + "] 页面内容异常，可能被反爬拦截")
             return policies, all_items
-        
+
         soup = BeautifulSoup(page_content, 'html.parser')
-        
+
         news_list = []
-        
+
         all_li = soup.find_all('li')
         for li in all_li:
             a_tag = li.find('a')
@@ -66,36 +68,36 @@ def scrape_data():
                     has_date = re.search(r'\d{4}-\d{2}-\d{2}', li_text)
                     if has_date:
                         news_list.append(li)
-        
+
         print("[" + "调试" + "] 通过日期模式找到 " + str(len(news_list)) + " 个列表项")
-        
+
         if len(news_list) == 0:
             title_text = soup.title.string if soup.title else '无标题'
             print("[" + "调试" + "] 页面标题: " + title_text)
             print("[" + "调试" + "] 页面内容预览（前3000字符）: " + page_content[:3000])
-        
+
         filtered_count = 0
-        
+
         for item in news_list:
             try:
                 title_tag = item.find('a')
                 if not title_tag:
                     continue
-                
+
                 title = title_tag.get_text(strip=True)
                 if not title:
                     continue
-                
+
                 if len(title) < 5:
                     continue
-                
+
                 policy_url = title_tag.get('href', '')
                 if not policy_url:
                     continue
-                
+
                 if 'javascript' in policy_url.lower():
                     continue
-                
+
                 if policy_url.startswith('//'):
                     policy_url = 'https:' + policy_url
                 elif not policy_url.startswith('http'):
@@ -103,10 +105,10 @@ def scrape_data():
                         policy_url = 'https://www.nmpa.gov.cn' + policy_url
                     else:
                         policy_url = 'https://www.nmpa.gov.cn/xxgk/fgwj/' + policy_url
-                
+
                 date_str = ''
                 item_text = item.get_text(strip=True)
-                
+
                 date_patterns = [
                     r'(\d{4}-\d{2}-\d{2})',
                     r'(\d{4}/\d{2}/\d{2})',
@@ -117,7 +119,7 @@ def scrape_data():
                     if match:
                         date_str = match.group(1)
                         break
-                
+
                 pub_at = None
                 if date_str:
                     date_str = date_str.strip()
@@ -128,13 +130,13 @@ def scrape_data():
                             break
                         except ValueError:
                             continue
-                
+
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 content = ""
                 try:
                     detail_cmd = [
@@ -147,12 +149,12 @@ def scrape_data():
                         '--cookie', 'cookies.txt',
                         policy_url
                     ]
-                    
+
                     detail_result = subprocess.run(detail_cmd, capture_output=True, timeout=30)
                     if detail_result.returncode == 0:
                         detail_content = detail_result.stdout.decode('utf-8', errors='ignore')
                         detail_soup = BeautifulSoup(detail_content, 'html.parser')
-                        
+
                         content_selectors = [
                             'div.content',
                             'div.article-content',
@@ -164,18 +166,18 @@ def scrape_data():
                             'div.text_content',
                             'div.content-text'
                         ]
-                        
+
                         content_elem = None
                         for selector in content_selectors:
                             content_elem = detail_soup.select_one(selector)
                             if content_elem:
                                 break
-                        
+
                         if content_elem:
                             content = content_elem.get_text(strip=True)
                 except Exception as e:
                     print("[" + "警告" + "] 获取详情页失败: " + policy_url + " - " + str(e))
-                
+
                 policy_data = {
                     'title': title,
                     'url': policy_url,
@@ -185,25 +187,25 @@ def scrape_data():
                     'category': '',
                     'source': '国家药品监督管理局'
                 }
-                
+
                 policies.append(policy_data)
-                
+
             except Exception as e:
                 print("[" + "警告" + "] 处理单条数据失败 - " + str(e))
                 continue
-        
-        print("[" + "成功" + "] 国家药监局爬虫：成功抓取 " + str(len(policies)) + " 条前一天数据")
+
+        print("[" + "成功" + "] 国家药监局爬虫：成功抓取 " + str(len(policies)) + " 条目标日期窗口数据")
         print("[" + "过滤" + "] 过滤掉 " + str(filtered_count) + " 条非目标日期的数据")
-        
+
         if all_items:
             print("[" + "统计" + "] 页面最新5条是：")
             for i, item in enumerate(all_items[:5], 1):
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 print("[" + "成功" + "] " + item['title'] + " " + date_str)
-    
+
     except Exception as e:
         print("[" + "失败" + "] 国家药监局爬虫：抓取失败 - " + str(e))
-    
+
     return policies, all_items
 
 

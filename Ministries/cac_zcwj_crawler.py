@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -21,20 +23,20 @@ def scrape_data():
     all_items = []
 
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
         print(f"[DATE] 运行日期（北京时间）：{today}")
-        print(f"[TARGET] 目标抓取日期：{yesterday}")
+        print(f"[TARGET] 目标抓取日期：{target_date_label}")
 
         session = requests.Session()
         session.headers.update(headers)
-        
+
         try:
             response = session.get("https://www.cac.gov.cn/", timeout=10)
         except:
             pass
-        
+
         response = session.get(TARGET_URL, timeout=30)
         response.raise_for_status()
         response.encoding = response.apparent_encoding
@@ -107,7 +109,7 @@ def scrape_data():
 
                 all_items.append({'title': title, 'pub_at': pub_at})
 
-                if pub_at != yesterday:
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
 
@@ -157,7 +159,7 @@ def scrape_data():
             except Exception:
                 continue
 
-        print(f'[OK] 国家互联网信息办公室政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 国家互联网信息办公室政策文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
         if all_items:

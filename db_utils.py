@@ -2,8 +2,14 @@ import os
 import json
 import requests
 from supabase import create_client, Client
-from datetime import date, datetime, timezone, timedelta
-import hashlib
+from datetime import datetime, timezone, timedelta
+
+from crawler_core import (
+    dedupe_policy_items,
+    external_send_enabled,
+    normalize_policy_item,
+    validate_policy_item,
+)
 
 # ==========================================
 # 数据库工具模块
@@ -16,10 +22,17 @@ class DBUtils:
         self.supabase_url = os.environ.get("SUPABASE_PROJECT_API")
         self.supabase_key = os.environ.get("SUPABASE_ANON_PUBLIC")
         self.client = None
-    
+        self.allow_external_send = external_send_enabled()
+        self.allow_api_push = os.getenv("POLICYCLAW_ENABLE_API_PUSH", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
     def get_client(self) -> Client:
         """获取 Supabase 客户端
-        
+
         Returns:
             Client: Supabase 客户端实例
         """
@@ -28,106 +41,144 @@ class DBUtils:
                 raise ValueError("缺少 Supabase 环境变量: SUPABASE_PROJECT_API 或 SUPABASE_ANON_PUBLIC")
             self.client = create_client(self.supabase_url, self.supabase_key)
         return self.client
-    
-    def process_data(self, data_list):
+
+    def process_data(self, data_list, source_name=""):
         """处理数据，准备写入数据库
-        
+
         Args:
             data_list: 原始数据列表
-            
+
         Returns:
             list: 处理后的数据列表
         """
         processed_data = []
-        
+        invalid_count = 0
+
         for item in data_list:
-            processed_item = item.copy()
-            
-            # 转换日期对象为字符串
-            if hasattr(processed_item.get('pub_at'), 'isoformat'):
-                processed_item['pub_at'] = processed_item['pub_at'].isoformat()
-            
-            # 确保必要字段存在
-            if 'selected' not in processed_item:
-                processed_item['selected'] = False
-            
+            processed_item = normalize_policy_item(item, source_name)
+            missing = validate_policy_item(processed_item)
+            if missing:
+                invalid_count += 1
+                print(f"⚠️  跳过核心字段缺失的数据：{','.join(missing)} - {processed_item.get('title') or processed_item.get('url')}")
+                continue
             processed_data.append(processed_item)
-        
+
+        processed_data, duplicate_count = dedupe_policy_items(processed_data)
+        if duplicate_count:
+            print(f"⏭️  全局政策实体去重：跳过 {duplicate_count} 条重复数据")
+        if invalid_count:
+            print(f"⚠️  数据校验：跳过 {invalid_count} 条核心字段缺失数据")
+
         return processed_data
-    
+
     def save_to_policy(self, data_list, source_name):
         """保存数据到 policy 表
-        
+
         Args:
             data_list: 数据列表
             source_name: 数据源名称
-            
+
         Returns:
             tuple: (成功写入的数据列表, API推送结果)
         """
         if not data_list:
             print(f"⚠️  {source_name}：没有数据需要写入，跳过。")
             return [], None
-        
+
         try:
-            # 处理数据
-            processed_data = self.process_data(data_list)
-            
+            processed_data = self.process_data(data_list, source_name)
+            if not processed_data:
+                print(f"⚠️  {source_name}：数据校验后没有可写入数据，跳过。")
+                return [], {"status": "skipped", "message": "数据校验后没有可写入数据"}
+
+            if not self.allow_external_send:
+                message = (
+                    f"DRY-RUN：已完成标准化和去重，模拟写入 {len(processed_data)} 条；"
+                    "未连接 Supabase，未推送外部 API。设置 POLICYCLAW_ENABLE_EXTERNAL_SEND=1 后才会真实发送。"
+                )
+                print(f"[DRY-RUN] {source_name}：{message}")
+                return processed_data, {"status": "dry_run", "message": message}
+
             # 获取客户端
             supabase = self.get_client()
-            
+
             # 尝试写入数据（不使用 on_conflict，避免约束错误）
             # 先获取现有数据，然后进行去重
             success_count = 0
-            
+
             for item in processed_data:
                 try:
-                    # 检查是否已存在
-                    existing = supabase.table("policy").select("id").eq("title", item.get("title")).execute()
-                    
+                    # 优先按政策实体指纹幂等写入；数据库约束未就绪时退回标题匹配。
+                    match_field = "policy_key"
+                    try:
+                        existing = (
+                            supabase.table("policy")
+                            .select("id")
+                            .eq("policy_key", item.get("policy_key"))
+                            .execute()
+                        )
+                    except Exception:
+                        match_field = "title"
+                        existing = supabase.table("policy").select("id").eq("title", item.get("title")).execute()
+
                     if existing.data:
                         # 已存在，更新数据
-                        response = supabase.table("policy").update(item).eq("title", item.get("title")).execute()
+                        response = supabase.table("policy").update(item).eq(match_field, item.get(match_field)).execute()
                     else:
                         # 不存在，插入数据
                         response = supabase.table("policy").insert(item).execute()
-                    
+
                     success_count += 1
-                    
+
                 except Exception as item_e:
                     print(f"⚠️  {source_name}：单条数据处理失败 - {item_e}")
                     continue
-            
+
             print(f"✅ {source_name}：成功写入 {success_count} 条数据到 Supabase")
-            
+
             # 推送数据到API接口
             api_push_result = None
             if success_count > 0:
-                api_push_result = self.push_to_api(data_list[:success_count], source_name)
-            
+                if self.allow_api_push:
+                    api_push_result = self.push_to_api(processed_data[:success_count], source_name)
+                else:
+                    api_push_result = {
+                        "status": "skipped",
+                        "message": "业务 API 推送开关未开启，跳过 push_to_api",
+                    }
+                    print(f"[DRY-RUN] {source_name}：{api_push_result['message']}。设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。")
+
             # 保存API推送结果到返回值中
             return data_list[:success_count], api_push_result
-            
+
         except Exception as e:
             print(f"❌ {source_name}：数据库写入失败 - {e}")
             return [], None
 
     def push_to_api(self, data_list, source_name):
         """将数据推送到目标API接口
-        
+
         Args:
             data_list: 数据列表
             source_name: 数据源名称
-            
+
         Returns:
             dict: 推送结果，包含status和message
         """
         if not data_list:
             print(f"⚠️  {source_name}：没有数据需要推送，跳过。")
             return {"status": "skipped", "message": "没有数据需要推送"}
-        
+
+        if not self.allow_external_send or not self.allow_api_push:
+            message = (
+                f"SKIP：业务 API 推送未开启，未推送 {len(data_list)} 条数据。"
+                "需要同时设置 POLICYCLAW_ENABLE_EXTERNAL_SEND=1 和 POLICYCLAW_ENABLE_API_PUSH=1。"
+            )
+            print(f"[DRY-RUN] {source_name}：{message}")
+            return {"status": "skipped", "message": message}
+
         target_url = "http://47.114.109.178:5000/api/receive-data"
-        
+
         try:
             # 构造JSON结构（按照接口示例格式）
             items = []
@@ -136,10 +187,10 @@ class DBUtils:
                 pub_at = item.get('pub_at', '')
                 if hasattr(pub_at, 'isoformat'):
                     pub_at = pub_at.isoformat()
-                
+
                 # 获取当前东八区时间作为crawled_at
                 crawled_at = datetime.now(timezone(timedelta(hours=8))).isoformat()
-                
+
                 item_data = {
                     "title": item.get('title', ''),
                     "url": item.get('url', ''),
@@ -148,7 +199,7 @@ class DBUtils:
                     "crawled_at": crawled_at
                 }
                 items.append(item_data)
-            
+
             # 构建完整的JSON结构
             payload = {
                 "sources": [
@@ -158,7 +209,7 @@ class DBUtils:
                     }
                 ]
             }
-            
+
             # 发送POST请求
             headers = {"Content-Type": "application/json; charset=utf-8"}
             response = requests.post(
@@ -167,13 +218,13 @@ class DBUtils:
                 headers=headers,
                 timeout=10
             )
-            
+
             # 检查响应状态
             response.raise_for_status()
             message = f"成功推送 {len(items)} 条数据到API"
             print(f"✅ {source_name}：{message}")
             return {"status": "success", "message": message}
-            
+
         except requests.exceptions.RequestException as e:
             message = f"API推送失败 - {e}"
             print(f"❌ {source_name}：{message}")
@@ -182,20 +233,20 @@ class DBUtils:
             message = f"推送过程中发生未知错误 - {e}"
             print(f"❌ {source_name}：{message}")
             return {"status": "error", "message": message}
-    
+
     def push_daily_status(self, date_str, success_count, fail_count):
         """推送每日爬虫状态数据到API接口
-        
+
         Args:
             date_str: 日期字符串，格式为 YYYY-MM-DD
             success_count: 成功爬取的文章数
             fail_count: 失败的爬取数
-            
+
         Returns:
             dict: 推送结果，包含status和message
         """
         target_url = "http://47.114.109.178:5000/api/receive-daily-status"
-        
+
         try:
             # 使用东八区时间作为date
             # 如果没有提供date_str，则使用当前东八区日期
@@ -203,14 +254,22 @@ class DBUtils:
                 east8_datetime = datetime.now(timezone(timedelta(hours=8)))
                 east8_date = east8_datetime.date()
                 date_str = east8_date.isoformat()
-            
+
             # 构造payload
             payload = {
                 "date": date_str,
                 "success_count": success_count,
                 "fail_count": fail_count
             }
-            
+
+            if not self.allow_external_send:
+                message = (
+                    f"DRY-RUN：模拟推送每日状态数据 - 日期={date_str}, "
+                    f"成功={success_count}, 失败={fail_count}，未真实发送"
+                )
+                print(f"[DRY-RUN] {message}")
+                return {"status": "dry_run", "message": message, "payload": payload}
+
             # 发送POST请求
             headers = {"Content-Type": "application/json; charset=utf-8"}
             response = requests.post(
@@ -219,13 +278,13 @@ class DBUtils:
                 headers=headers,
                 timeout=10
             )
-            
+
             # 检查响应状态
             response.raise_for_status()
             message = f"成功推送每日状态数据 - 日期={date_str}, 成功={success_count}, 失败={fail_count}"
             print(f"✅ {message}")
             return {"status": "success", "message": message}
-            
+
         except requests.exceptions.RequestException as e:
             message = f"每日状态数据推送失败 - {e}"
             print(f"❌ {message}")
@@ -241,11 +300,11 @@ db_utils = DBUtils()
 # 便捷函数
 def save_to_policy(data_list, source_name):
     """便捷函数：保存数据到 policy 表
-    
+
     Args:
         data_list: 数据列表
         source_name: 数据源名称
-        
+
     Returns:
         tuple: (成功写入的数据列表, API推送结果)
     """
@@ -254,11 +313,11 @@ def save_to_policy(data_list, source_name):
 # 便捷函数
 def push_to_api(data_list, source_name):
     """便捷函数：将数据推送到API接口
-    
+
     Args:
         data_list: 数据列表
         source_name: 数据源名称
-        
+
     Returns:
         bool: 是否成功推送
     """
@@ -267,12 +326,12 @@ def push_to_api(data_list, source_name):
 # 便捷函数
 def push_daily_status(date_str, success_count, fail_count):
     """便捷函数：推送每日爬虫状态数据到API接口
-    
+
     Args:
         date_str: 日期字符串，格式为 YYYY-MM-DD
         success_count: 成功爬取的文章数
         fail_count: 失败的爬取数
-        
+
     Returns:
         bool: 是否成功推送
     """

@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -44,7 +46,7 @@ def get_article_content(url):
         response.raise_for_status()
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         content_box = soup.find(class_='content_box')
         if content_box:
             divs = content_box.find_all('div')
@@ -61,42 +63,42 @@ def get_article_content(url):
 def scrape_data(source_name, url):
     policies = []
     all_items = []
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
+
         print(f"[INFO] 运行日期（北京时间）：{today}")
-        print(f"[INFO] 目标抓取日期：{yesterday}")
-        
+        print(f"[INFO] 目标抓取日期：{target_date_label}")
+
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
-        
+
         div_container = soup.find(id='div')
         if not div_container:
             print(f"[ERROR] 未找到文章列表容器 id='div'")
             return policies, all_items
-        
+
         lis = div_container.find_all('li')
         print(f"[INFO] 找到 {len(lis)} 条数据")
-        
+
         filtered_count = 0
-        
+
         for li in lis:
             try:
                 a = li.find('a', href=True)
                 if not a:
                     continue
-                
+
                 title = a.get_text(strip=True)
                 href = a.get('href', '')
-                
+
                 if not title or not href:
                     continue
-                
+
                 article_url = href
                 if href.startswith('../'):
                     article_url = BASE_URL + href[2:]
@@ -104,20 +106,20 @@ def scrape_data(source_name, url):
                     article_url = BASE_URL + href[1:]
                 elif not href.startswith('http'):
                     article_url = BASE_URL + href
-                
+
                 date_span = li.find('span', class_='date')
                 date_str = date_span.get_text(strip=True) if date_span else ''
-                
+
                 pub_at = parse_date(date_str)
-                
+
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 content = get_article_content(article_url)
-                
+
                 policy_data = {
                     'title': title,
                     'url': article_url,
@@ -127,16 +129,16 @@ def scrape_data(source_name, url):
                     'category': '',
                     'source': f'生态环境部_{source_name}'
                 }
-                
+
                 policies.append(policy_data)
-                
+
             except Exception as e:
                 print(f"[WARN] 单条数据处理失败 - {e}")
                 continue
-        
-        print(f"\n[OK] 生态环境部_{source_name}：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"\n[OK] 生态环境部_{source_name}：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         if all_items:
             print(f"\n[INFO] 页面最新5条是：")
             sorted_items = sorted(all_items, key=lambda x: x['pub_at'] or datetime.min.date(), reverse=True)
@@ -144,11 +146,11 @@ def scrape_data(source_name, url):
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 title = item['title'][:50]
                 print(f"[OK] {title}... {date_str}")
-        
+
     except Exception as e:
         print(f"[ERROR] 生态环境部_{source_name}：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 
@@ -164,13 +166,13 @@ def save_to_supabase(data_list):
 def run():
     all_results = []
     api_push_results = []
-    
+
     for source_name, url in TARGET_URLS.items():
         print(f"\n=========================================")
         print(f"[INFO] 开始抓取 生态环境部_{source_name}")
         print(f"[INFO] 目标网址: {url}")
         print("----------------------------------------")
-        
+
         try:
             data, _ = scrape_data(source_name, url)
             if data:
@@ -185,12 +187,12 @@ def run():
         except Exception as e:
             print(f"[ERROR] 爬虫 生态环境部_{source_name} 运行失败 - {e}")
             print("----------------------------------------")
-    
+
     print("\n=========================================")
     print(f"[OK] 爬虫 生态环境部 执行完成")
     print(f"[INFO] 总抓取数据: {len(all_results)} 条")
     print("----------------------------------------")
-    
+
     return all_results, api_push_results
 
 

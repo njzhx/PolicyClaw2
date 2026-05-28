@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 import json
 
@@ -17,19 +19,19 @@ TARGET_URL = "https://www.mca.gov.cn/gdnps/searchIndex.jsp?params=%257B%2522goPa
 def scrape_data():
     policies = []
     all_items = []
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
+
         print(f"📅 运行日期（北京时间）：{today}")
-        print(f"🎯 目标抓取日期：{yesterday}")
-        
+        print(f"🎯 目标抓取日期：{target_date_label}")
+
         print("正在从API获取数据...")
         response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
-        
+
         # Parse JSON response
         text = response.text.strip()
         if text.startswith('('):
@@ -53,18 +55,18 @@ def scrape_data():
             raise
         all_records = data.get('resultMap', [])
         print(f"📋 API返回 {len(all_records)} 条数据")
-        
+
         filtered_count = 0
-        
+
         for record in all_records:
             try:
                 title = record.get('title', '')
                 publish_time_str = record.get('publishTime', '')
                 html_content = record.get('htmlContent', '')
-                
+
                 if not title:
                     continue
-                
+
                 # Parse publishTime: "20260429095000" -> date
                 pub_at = None
                 if publish_time_str:
@@ -73,22 +75,22 @@ def scrape_data():
                         pub_at = datetime.strptime(publish_time_str[:8], '%Y%m%d').date()
                     except ValueError:
                         pass
-                
+
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 # Extract text from HTML content
                 content = ""
                 if html_content:
                     content_soup = BeautifulSoup(html_content, 'html.parser')
                     content = content_soup.get_text(separator='\n', strip=True)
-                
+
                 # Build URL from record
                 url = f"https://www.mca.gov.cn{record.get('url', '')}"
-                
+
                 policy_data = {
                     'title': title,
                     'url': url,
@@ -98,16 +100,16 @@ def scrape_data():
                     'category': '',
                     'source': '民政部政策文件'
                 }
-                
+
                 policies.append(policy_data)
-                
+
             except Exception as e:
                 print(f"⚠️  单条数据处理失败 - {e}")
                 continue
-        
-        print(f"\n✅ 民政部政策文件爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"\n✅ 民政部政策文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         if all_items:
             print(f"\n📊 页面最新5条是：")
             sorted_items = sorted(all_items, key=lambda x: x['pub_at'] or datetime.min.date(), reverse=True)
@@ -115,11 +117,11 @@ def scrape_data():
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 title = item['title'][:50]
                 print(f"✅ {title}... {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 民政部政策文件爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 

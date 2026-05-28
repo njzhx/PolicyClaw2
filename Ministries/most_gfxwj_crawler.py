@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 from urllib.parse import urljoin
 
@@ -16,47 +18,47 @@ TARGET_URL = "https://www.most.gov.cn/xxgk/xinxifenlei/fdzdgknr/fgzc/gfxwj/"
 def scrape_data():
     policies = []
     all_items = []
-    
+
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
-        
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
+        today = datetime.now(timezone(timedelta(hours=8))).date()
+
         print(f"运行日期（北京时间）：{today}")
-        print(f"目标抓取日期：{yesterday}")
-        
+        print(f"目标抓取日期：{target_date_label}")
+
         response = requests.get(TARGET_URL, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         # Find data_list div
         data_list = soup.find(id='data_list')
         if not data_list:
             print("文章列表未找到")
             return policies, all_items
-        
+
         lis = data_list.find_all('li')
         print(f"找到 {len(lis)} 条数据")
-        
+
         filtered_count = 0
-        
+
         for li in lis:
             try:
                 a = li.find('a')
                 if not a:
                     continue
-                
+
                 title = a.get_text(strip=True)
                 href = a.get('href', '')
-                
+
                 if not title or not href:
                     continue
-                
+
                 # Convert relative URL to absolute
                 if '/xxgk/xinxifenlei/' in href:
                     href = href.replace('/xxgk/xinxifenlei/', '/')
                 full_url = urljoin("https://www.most.gov.cn/", href)
-                
+
                 # Extract date from URL path
                 date_pattern = re.compile(r'/(\d{4})(\d{2})/t(\d{4})(\d{2})(\d{2})')
                 match = date_pattern.search(href)
@@ -67,20 +69,20 @@ def scrape_data():
                         pub_at = datetime.strptime(date_str, '%Y-%m-%d').date()
                     except ValueError:
                         pass
-                
+
                 all_items.append({'title': title, 'pub_at': pub_at})
-                
-                if pub_at != yesterday:
+
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
-                
+
                 # Fetch detail page content
                 content = ""
                 try:
                     detail_resp = requests.get(full_url, headers=headers, timeout=15)
                     if detail_resp.status_code == 200:
                         detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-                        
+
                         # Try the specific XPath: //div[@class="xxgk_detail_content style1"]
                         content_div = detail_soup.find('div', class_='xxgk_detail_content style1')
                         if content_div:
@@ -99,7 +101,7 @@ def scrape_data():
                                 content = max_text
                 except Exception as e:
                     print(f"抓取详情页失败：{e}")
-                
+
                 policy_data = {
                     'title': title,
                     'url': full_url,
@@ -109,16 +111,16 @@ def scrape_data():
                     'category': '',
                     'source': '科技部规范性文件'
                 }
-                
+
                 policies.append(policy_data)
-                
+
             except Exception as e:
                 print(f"单条数据处理失败 - {e}")
                 continue
-        
-        print(f"\n✅ 科技部规范性文件爬虫：成功抓取 {len(policies)} 条前一天数据")
+
+        print(f"\n✅ 科技部规范性文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
         print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-        
+
         if all_items:
             print(f"\n📊 页面最新5条是：")
             sorted_items = sorted(all_items, key=lambda x: x['pub_at'] or datetime.min.date(), reverse=True)
@@ -126,11 +128,11 @@ def scrape_data():
                 date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
                 title = item['title'][:50]
                 print(f"✅ {title}... {date_str}")
-        
+
     except Exception as e:
         print(f"❌ 科技部规范性文件爬虫：抓取失败 - {e}")
         print("----------------------------------------")
-    
+
     return policies, all_items
 
 

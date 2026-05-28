@@ -1,6 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
+
+from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -16,13 +18,12 @@ def scrape_data():
     all_items = []
 
     try:
-        tz_utc8 = timezone(timedelta(hours=8))
-        today = datetime.now(tz_utc8).date()
-        yesterday = today - timedelta(days=1)
+        target_date_from, target_date_to = get_crawl_date_window()
+        target_date_label = format_date_window(target_date_from, target_date_to)
 
         response = requests.get(API_URL, headers=headers, timeout=30)
         response.raise_for_status()
-        
+
         try:
             soup = BeautifulSoup(response.content, 'xml')
             records = soup.find_all('record')
@@ -41,10 +42,10 @@ def scrape_data():
                     if a_tag:
                         title = a_tag.get('title', '').strip() or a_tag.get_text(strip=True)
                         href = a_tag.get('href', '').strip()
-                        
+
                         span_tag = li_tag.find('span')
                         date_str = span_tag.get_text(strip=True) if span_tag else ''
-                        
+
                         if title and href and len(title) > 5:
                             policy_links[href] = {
                                 'title': title,
@@ -87,7 +88,7 @@ def scrape_data():
                         pub_at = datetime.strptime(item['date_str'], '%Y-%m-%d').date()
                     except ValueError:
                         pass
-                
+
                 if not pub_at:
                     date_match = re.search(r'/(\d{4})/(\d{1,2})/(\d{1,2})/', href)
                     if date_match:
@@ -98,14 +99,14 @@ def scrape_data():
 
                 all_items.append({'title': title, 'pub_at': pub_at})
 
-                if pub_at != yesterday:
+                if not is_target_date(pub_at, target_date_from, target_date_to):
                     filtered_count += 1
                     continue
 
                 content = ""
                 attachments = []
                 related_links = []
-                
+
                 try:
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
@@ -123,12 +124,12 @@ def scrape_data():
                         content_elem = detail_soup.find('div', class_='left')
                         if content_elem:
                             content = content_elem.get_text(separator='\n', strip=True)
-                    
+
                     all_links = detail_soup.find_all('a', href=True)
                     for link in all_links:
                         link_href = link.get('href', '')
                         link_text = link.get_text(strip=True)
-                        
+
                         if '.pdf' in link_href.lower():
                             if link_href.startswith('/'):
                                 pdf_url = "https://mf.jiangsu.gov.cn" + link_href
@@ -137,7 +138,7 @@ def scrape_data():
                             else:
                                 pdf_url = link_href
                             attachments.append({'type': 'pdf', 'name': link_text, 'url': pdf_url})
-                        
+
                         elif '/art/' in link_href and link_href != href:
                             if link_href.startswith('/'):
                                 related_url = "https://mf.jiangsu.gov.cn" + link_href
@@ -155,7 +156,7 @@ def scrape_data():
                     attachments_info = "\n\n[附件]\n"
                     for att in attachments:
                         attachments_info += f"- {att['name']}: {att['url']}\n"
-                
+
                 related_info = ""
                 if related_links:
                     related_info = "\n\n[相关链接]\n"
@@ -176,7 +177,7 @@ def scrape_data():
             except Exception as e:
                 continue
 
-        print(f'[OK] 江苏省国防动员办公室政策文件爬虫：成功抓取 {len(policies)} 条前一天数据')
+        print(f'[OK] 江苏省国防动员办公室政策文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据')
         print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
 
         if all_items:
