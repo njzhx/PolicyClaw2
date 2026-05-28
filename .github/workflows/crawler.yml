@@ -10,24 +10,30 @@ on:
       crawl_date:
         description: '单日补跑日期（YYYY-MM-DD，留空则使用日期窗口）'
         required: false
+        type: string
       crawl_date_from:
         description: '补跑开始日期（YYYY-MM-DD）'
         required: false
+        type: string
       crawl_date_to:
         description: '补跑结束日期（YYYY-MM-DD）'
         required: false
+        type: string
       crawl_window_days:
         description: '默认滑动窗口天数'
         required: false
         default: '7'
+        type: string
       enable_external_send:
         description: '是否真实写 Supabase、推 API、发飞书'
         required: false
         default: 'false'
+        type: boolean
       enable_api_push:
         description: '是否真实推送业务 API（测试期建议保持 false）'
         required: false
         default: 'false'
+        type: boolean
 
 jobs:
   crawl:
@@ -99,12 +105,12 @@ jobs:
           SUPABASE_PROJECT_API: ${{ secrets.SUPABASE_PROJECT_API }}
           SUPABASE_ANON_PUBLIC: ${{ secrets.SUPABASE_ANON_PUBLIC }}
           FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
-          CRAWL_DATE: ${{ github.event.inputs.crawl_date }}
-          CRAWL_DATE_FROM: ${{ github.event.inputs.crawl_date_from }}
-          CRAWL_DATE_TO: ${{ github.event.inputs.crawl_date_to }}
-          CRAWL_WINDOW_DAYS: ${{ github.event.inputs.crawl_window_days || '7' }}
-          POLICYCLAW_ENABLE_EXTERNAL_SEND: ${{ github.event.inputs.enable_external_send == 'true' && '1' || '0' }}
-          POLICYCLAW_ENABLE_API_PUSH: ${{ github.event.inputs.enable_api_push == 'true' && '1' || '0' }}
+          CRAWL_DATE: ${{ inputs.crawl_date }}
+          CRAWL_DATE_FROM: ${{ inputs.crawl_date_from }}
+          CRAWL_DATE_TO: ${{ inputs.crawl_date_to }}
+          CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days || '7' }}
+          POLICYCLAW_ENABLE_EXTERNAL_SEND: ${{ inputs.enable_external_send && '1' || '0' }}
+          POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}
 
       - name: 上传运行结果
         if: always()
