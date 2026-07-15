@@ -97,7 +97,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '中央部委',
                     'source': '民政部政策文件'
                 }
 

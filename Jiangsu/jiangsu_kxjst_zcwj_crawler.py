@@ -100,7 +100,7 @@ def scrape_data():
                 'pub_at': pub_at,
                 'content': content,
                 'selected': False,
-                'category': '江苏省科技厅政策文件',
+                'category': '江苏省本级',
                 'source': SOURCE_NAME
             }
             policies.append(policy_data)

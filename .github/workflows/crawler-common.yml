@@ -1,0 +1,164 @@
+name: 政策爬虫（公共执行流程）
+
+on:
+  workflow_call:
+    inputs:
+      crawl_mode:
+        description: '日期模式'
+        required: true
+        type: string
+      crawl_date:
+        description: '单日补跑日期'
+        required: false
+        default: ''
+        type: string
+      crawl_date_from:
+        description: '补跑开始日期'
+        required: false
+        default: ''
+        type: string
+      crawl_date_to:
+        description: '补跑结束日期'
+        required: false
+        default: ''
+        type: string
+      crawl_window_days:
+        description: '滑动窗口天数'
+        required: false
+        default: ''
+        type: string
+      enable_supabase_write:
+        description: '是否写入 Supabase'
+        required: false
+        default: true
+        type: boolean
+      enable_api_push:
+        description: '是否推送 API'
+        required: false
+        default: true
+        type: boolean
+      enable_feishu_notify:
+        description: '是否推送飞书结果提醒'
+        required: false
+        default: true
+        type: boolean
+      verbose_crawler_log:
+        description: '是否输出爬虫原始日志'
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      SUPABASE_PROJECT_URL:
+        required: false
+      SUPABASE_SECRET_KEY:
+        required: false
+      FEISHU_BOT_WEBHOOK:
+        required: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+
+      - name: Set timezone to Beijing (UTC+8)
+        run: |
+          sudo timedatectl set-timezone Asia/Shanghai
+          date
+
+      - name: 设置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: 校验日期运行参数
+        run: |
+          python - <<'PY'
+          from crawler_core import format_date_window, get_crawl_date_window
+
+          start, end = get_crawl_date_window()
+          print(f"日期参数校验通过，目标日期窗口：{format_date_window(start, end)}")
+          PY
+        env:
+          CRAWL_MODE: ${{ inputs.crawl_mode }}
+          CRAWL_DATE: ${{ inputs.crawl_date }}
+          CRAWL_DATE_FROM: ${{ inputs.crawl_date_from }}
+          CRAWL_DATE_TO: ${{ inputs.crawl_date_to }}
+          CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days }}
+
+      - name: 增加域名hosts并验证
+        continue-on-error: true
+        run: |
+          echo "36.156.81.221 www.mca.gov.cn" | sudo tee -a /etc/hosts
+          echo "36.156.173.115 gi.mnr.gov.cn" | sudo tee -a /etc/hosts
+          echo "36.156.81.222 www.mohurd.gov.cn" | sudo tee -a /etc/hosts
+
+          echo "Verifying www.mca.gov.cn..."
+          ping -c 2 www.mca.gov.cn || true
+
+          echo "Verifying gi.mnr.gov.cn..."
+          ping -c 2 gi.mnr.gov.cn || true
+
+          echo "Verifying www.mohurd.gov.cn..."
+          ping -c 2 www.mohurd.gov.cn || true
+
+      - name: 安装 Google Chrome (通用自动补全依赖版)
+        run: |
+          sudo fuser -kk /var/lib/dpkg/lock-frontend || true
+          sudo dpkg --configure -a
+
+          sudo printf "Package: chromium-browser\nPin: release *\nPin-Priority: -1\n" | sudo tee /etc/apt/preferences.d/nosnap.pref
+
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+
+          sudo ln -s /usr/bin/google-chrome /usr/bin/chromium-browser || true
+
+          google-chrome --version
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          playwright install chromium
+
+      - name: 创建results目录
+        run: mkdir -p results
+
+      - name: 执行爬虫并保存输出
+        run: |
+          python crawler_manager.py 2>&1 | tee results/crawler_output_$(date +%Y%m%d_%H%M%S).md
+        env:
+          CRAWL_MODE: ${{ inputs.crawl_mode }}
+          CRAWL_DATE: ${{ inputs.crawl_date }}
+          CRAWL_DATE_FROM: ${{ inputs.crawl_date_from }}
+          CRAWL_DATE_TO: ${{ inputs.crawl_date_to }}
+          CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days }}
+          SUPABASE_PROJECT_URL: ${{ secrets.SUPABASE_PROJECT_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          SUPABASE_TABLE: policyclaw2
+          FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
+          POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ inputs.enable_supabase_write && '1' || '0' }}
+          POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}
+          POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ inputs.enable_feishu_notify && '1' || '0' }}
+          POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
+
+      - name: 上传运行结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawler-results-${{ github.run_number }}
+          path: results/
+          retention-days: 30
+
+      - name: 输出执行结果
+        if: always()
+        run: echo "爬虫执行完成，请查看上方日志"

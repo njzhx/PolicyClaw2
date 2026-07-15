@@ -161,7 +161,7 @@ def scrape_single_config(config):
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '中央部委',
                     'source': config['source']
                 }
                 policies.append(policy_data)

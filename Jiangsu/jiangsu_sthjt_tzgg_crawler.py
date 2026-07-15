@@ -136,7 +136,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '江苏省本级',
                     'source': '江苏省生态环境厅通知'
                 }
                 policies.append(policy_data)

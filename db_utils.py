@@ -5,9 +5,10 @@ from supabase import create_client, Client
 from datetime import datetime, timezone, timedelta
 
 from crawler_core import (
+    api_push_enabled,
     dedupe_policy_items,
-    external_send_enabled,
     normalize_policy_item,
+    supabase_write_enabled,
     validate_policy_item,
 )
 
@@ -16,19 +17,33 @@ from crawler_core import (
 # 功能：提供统一的数据库操作功能，避免重复代码
 # ==========================================
 
+POLICY_TABLE_FIELDS = (
+    "title",
+    "url",
+    "pub_at",
+    "content",
+    "selected",
+    "category",
+    "source",
+    "policy_key",
+)
+
+
 class DBUtils:
     def __init__(self):
         """初始化数据库工具"""
-        self.supabase_url = os.environ.get("SUPABASE_PROJECT_API")
-        self.supabase_key = os.environ.get("SUPABASE_ANON_PUBLIC")
+        self.supabase_url = (
+            os.environ.get("SUPABASE_PROJECT_URL")
+            or os.environ.get("SUPABASE_PROJECT_API")
+        )
+        self.supabase_key = (
+            os.environ.get("SUPABASE_SECRET_KEY")
+            or os.environ.get("SUPABASE_ANON_PUBLIC")
+        )
+        self.policy_table = os.getenv("SUPABASE_TABLE", "policyclaw2").strip() or "policyclaw2"
         self.client = None
-        self.allow_external_send = external_send_enabled()
-        self.allow_api_push = os.getenv("POLICYCLAW_ENABLE_API_PUSH", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }
+        self.allow_supabase_write = supabase_write_enabled()
+        self.allow_api_push = api_push_enabled()
 
     def get_client(self) -> Client:
         """获取 Supabase 客户端
@@ -38,7 +53,9 @@ class DBUtils:
         """
         if not self.client:
             if not self.supabase_url or not self.supabase_key:
-                raise ValueError("缺少 Supabase 环境变量: SUPABASE_PROJECT_API 或 SUPABASE_ANON_PUBLIC")
+                raise ValueError(
+                    "缺少 Supabase 环境变量: SUPABASE_PROJECT_URL 或 SUPABASE_SECRET_KEY"
+                )
             self.client = create_client(self.supabase_url, self.supabase_key)
         return self.client
 
@@ -71,8 +88,13 @@ class DBUtils:
 
         return processed_data
 
+    @staticmethod
+    def to_database_item(item):
+        """只保留 policyclaw2 表实际存在并由爬虫负责写入的字段。"""
+        return {field: item.get(field) for field in POLICY_TABLE_FIELDS if field in item}
+
     def save_to_policy(self, data_list, source_name):
-        """保存数据到 policy 表
+        """保存数据到 policyclaw2 表
 
         Args:
             data_list: 数据列表
@@ -91,68 +113,79 @@ class DBUtils:
                 print(f"⚠️  {source_name}：数据校验后没有可写入数据，跳过。")
                 return [], {"status": "skipped", "message": "数据校验后没有可写入数据"}
 
-            if not self.allow_external_send:
-                message = (
-                    f"DRY-RUN：已完成标准化和去重，模拟写入 {len(processed_data)} 条；"
-                    "未连接 Supabase，未推送外部 API。设置 POLICYCLAW_ENABLE_EXTERNAL_SEND=1 后才会真实发送。"
-                )
-                print(f"[DRY-RUN] {source_name}：{message}")
-                return processed_data, {"status": "dry_run", "message": message}
-
-            # 获取客户端
-            supabase = self.get_client()
-
-            # 尝试写入数据（不使用 on_conflict，避免约束错误）
-            # 先获取现有数据，然后进行去重
-            success_count = 0
-
-            for item in processed_data:
+            saved_items = []
+            if self.allow_supabase_write:
                 try:
-                    # 优先按政策实体指纹幂等写入；数据库约束未就绪时退回标题匹配。
-                    match_field = "policy_key"
-                    try:
-                        existing = (
-                            supabase.table("policy")
-                            .select("id")
-                            .eq("policy_key", item.get("policy_key"))
-                            .execute()
-                        )
-                    except Exception:
-                        match_field = "title"
-                        existing = supabase.table("policy").select("id").eq("title", item.get("title")).execute()
+                    # 尝试写入数据（不使用 on_conflict，避免约束错误）
+                    supabase = self.get_client()
+                    for item in processed_data:
+                        try:
+                            database_item = self.to_database_item(item)
+                            # 优先按政策实体指纹幂等写入；数据库约束未就绪时退回标题匹配。
+                            match_field = "policy_key"
+                            try:
+                                existing = (
+                                    supabase.table(self.policy_table)
+                                    .select("id")
+                                    .eq("policy_key", database_item.get("policy_key"))
+                                    .execute()
+                                )
+                            except Exception:
+                                match_field = "title"
+                                existing = (
+                                    supabase.table(self.policy_table)
+                                    .select("id")
+                                    .eq("title", database_item.get("title"))
+                                    .execute()
+                                )
 
-                    if existing.data:
-                        # 已存在，更新数据
-                        response = supabase.table("policy").update(item).eq(match_field, item.get(match_field)).execute()
-                    else:
-                        # 不存在，插入数据
-                        response = supabase.table("policy").insert(item).execute()
+                            if existing.data:
+                                # 已存在，更新数据
+                                (
+                                    supabase.table(self.policy_table)
+                                    .update(database_item)
+                                    .eq(match_field, database_item.get(match_field))
+                                    .execute()
+                                )
+                            else:
+                                # 不存在，插入数据
+                                supabase.table(self.policy_table).insert(database_item).execute()
 
-                    success_count += 1
+                            saved_items.append(item)
 
-                except Exception as item_e:
-                    print(f"⚠️  {source_name}：单条数据处理失败 - {item_e}")
-                    continue
+                        except Exception as item_e:
+                            print(f"⚠️  {source_name}：单条数据处理失败 - {item_e}")
+                            continue
 
-            print(f"✅ {source_name}：成功写入 {success_count} 条数据到 Supabase")
+                    print(f"✅ {source_name}：成功写入 {len(saved_items)} 条数据到 Supabase")
+                except Exception as database_e:
+                    print(f"❌ {source_name}：数据库写入失败 - {database_e}")
+            else:
+                print(
+                    f"[DRY-RUN] {source_name}：Supabase 写入开关未开启，"
+                    f"跳过写入 {len(processed_data)} 条数据。"
+                    "设置 POLICYCLAW_ENABLE_SUPABASE_WRITE=1 后才会写入。"
+                )
 
-            # 推送数据到API接口
+            # API 与 Supabase 独立：即使不写数据库，也可推送本次标准化后的数据。
             api_push_result = None
-            if success_count > 0:
-                if self.allow_api_push:
-                    api_push_result = self.push_to_api(processed_data[:success_count], source_name)
-                else:
-                    api_push_result = {
-                        "status": "skipped",
-                        "message": "业务 API 推送开关未开启，跳过 push_to_api",
-                    }
-                    print(f"[DRY-RUN] {source_name}：{api_push_result['message']}。设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。")
+            if self.allow_api_push:
+                api_push_result = self.push_to_api(processed_data, source_name)
+            else:
+                api_push_result = {
+                    "status": "skipped",
+                    "message": "API 推送开关未开启，跳过 push_to_api",
+                }
+                print(
+                    f"[DRY-RUN] {source_name}：{api_push_result['message']}。"
+                    "设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。"
+                )
 
-            # 保存API推送结果到返回值中
-            return data_list[:success_count], api_push_result
+            # 返回抓取并标准化后的数据；数据库成功数由 Supabase 日志单独统计。
+            return processed_data, api_push_result
 
         except Exception as e:
-            print(f"❌ {source_name}：数据库写入失败 - {e}")
+            print(f"❌ {source_name}：数据处理失败 - {e}")
             return [], None
 
     def push_to_api(self, data_list, source_name):
@@ -169,10 +202,10 @@ class DBUtils:
             print(f"⚠️  {source_name}：没有数据需要推送，跳过。")
             return {"status": "skipped", "message": "没有数据需要推送"}
 
-        if not self.allow_external_send or not self.allow_api_push:
+        if not self.allow_api_push:
             message = (
-                f"SKIP：业务 API 推送未开启，未推送 {len(data_list)} 条数据。"
-                "需要同时设置 POLICYCLAW_ENABLE_EXTERNAL_SEND=1 和 POLICYCLAW_ENABLE_API_PUSH=1。"
+                f"SKIP：API 推送开关未开启，未推送 {len(data_list)} 条数据。"
+                "设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。"
             )
             print(f"[DRY-RUN] {source_name}：{message}")
             return {"status": "skipped", "message": message}
@@ -262,10 +295,10 @@ class DBUtils:
                 "fail_count": fail_count
             }
 
-            if not self.allow_external_send:
+            if not self.allow_api_push:
                 message = (
                     f"DRY-RUN：模拟推送每日状态数据 - 日期={date_str}, "
-                    f"成功={success_count}, 失败={fail_count}，未真实发送"
+                    f"成功={success_count}, 失败={fail_count}，API 推送开关未开启"
                 )
                 print(f"[DRY-RUN] {message}")
                 return {"status": "dry_run", "message": message, "payload": payload}

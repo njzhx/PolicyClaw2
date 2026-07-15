@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import CrawlerRunResult, format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 目标网站URL
@@ -135,7 +135,7 @@ def scrape_data():
                 'pub_at': pub_at,
                 'content': content,
                 'selected': False,
-                'category': '江苏省自然资源厅政策文件',
+                'category': '江苏省本级',
                 'source': SOURCE_NAME
             }
             policies.append(policy_data)
@@ -182,11 +182,25 @@ def run():
         if data:
             result, api_push_result = save_to_supabase(data)
             print(f"\n写入数据库：{len(result)} 条")
-            return result
+            return CrawlerRunResult(
+                items=result,
+                latest_items=all_items[:5],
+                metrics={},
+                api_push_result=api_push_result,
+            )
         else:
             print("\n写入数据库：0 条")
             print("未找到目标日期窗口发布的政策文件")
-            return []
+            return CrawlerRunResult(
+                items=[],
+                latest_items=all_items[:5],
+                metrics={},
+                storage_result={
+                    "status": "skipped",
+                    "saved_count": 0,
+                    "message": "没有数据需要写入",
+                },
+            )
     except Exception as e:
         print(f"爬虫运行失败：{e}")
         return []

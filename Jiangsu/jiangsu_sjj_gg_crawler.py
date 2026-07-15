@@ -121,7 +121,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '江苏省本级',
                     'source': '江苏省数据局通知公告'
                 }
 

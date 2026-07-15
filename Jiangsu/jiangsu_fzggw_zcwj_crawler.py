@@ -109,7 +109,7 @@ def scrape_data():
                         'pub_at': pub_at,
                         'content': content,
                         'selected': False,
-                        'category': '',
+                        'category': '江苏省本级',
                         'source': '江苏省发改委'
                     }
                     policies.append(policy_data)
@@ -162,4 +162,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-

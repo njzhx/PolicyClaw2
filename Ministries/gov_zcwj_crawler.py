@@ -90,7 +90,7 @@ def scrape_with_api():
                     'title': title,
                     'url': url,
                     'pub_at': pub_at,
-                    'category': catName,
+                    'category': '中央部委',
                     'pcode': pcode
                 })
 
@@ -167,7 +167,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': category,
+                    'category': '中央部委',
                     'source': '国务院文件'
                 }
 

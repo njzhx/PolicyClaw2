@@ -4,7 +4,11 @@ import sys
 from datetime import datetime
 from io import StringIO
 
-from crawler_core import adapt_legacy_result, get_crawl_date_window
+from crawler_core import (
+    adapt_legacy_result,
+    feishu_notify_enabled,
+    get_crawl_date_window,
+)
 
 # 导入飞书通知模块
 try:
@@ -83,47 +87,73 @@ class CrawlerManager:
             return "SUSPECT"
         return "OK"
 
-    def _print_crawler_result(self, index, total, name, result, crawler_output=""):
-        metrics = result.get("metrics") or {}
-        target_url = result.get("target_url") or "-"
-        api_result = result.get("api_push_result")
-        api_status = "-"
-        if isinstance(api_result, dict):
-            api_status = api_result.get("status", "-")
+    @staticmethod
+    def _print_crawler_header(name, target_url):
+        print(f"\n📦 开始执行爬虫: {name}")
+        print(f"🔗 目标网址: {target_url or '-'}")
+        print("-" * 40)
 
-        status = result.get("status", "unknown").upper()
-        health = self._metric_health(result)
-        print(f"\n[{index:03d}/{total:03d}] {name}")
-        print(f"  status={status} health={health} elapsed={result.get('execution_time', 0)}s")
-        print(f"  url={target_url}")
-        print(
-            "  counts "
-            f"raw={metrics.get('raw_item_count', 0)} "
-            f"valid={metrics.get('valid_item_count', 0)} "
-            f"target={metrics.get('target_date_count', result.get('crawl_count', 0))} "
-            f"filtered={metrics.get('filtered_count', result.get('filter_count', 0))} "
-            f"invalid={metrics.get('invalid_item_count', 0)} "
-            f"empty_content={metrics.get('empty_content_count', 0)} "
-            f"duplicate={metrics.get('duplicate_policy_count', 0)} "
-            f"saved={result.get('write_count', 0)}"
-        )
-        print(f"  api_push={api_status}")
+    def _print_crawler_result(self, name, result, crawler_output=""):
+        metrics = result.get("metrics") or {}
+        latest_items = result.get("latest_items") or []
+        storage_result = result.get("storage_result") or {}
+        api_result = result.get("api_push_result")
+
+        if result.get("status") == "success":
+            print(f"✅ {name}爬虫：成功抓取 {result.get('crawl_count', 0)} 条目标日期数据")
+            print(f"⏭️  过滤掉 {result.get('filter_count', 0)} 条非目标日期的数据")
+            print("📊 页面最新5条是：")
+            if latest_items:
+                for item in latest_items[:5]:
+                    title = str(item.get("title") or "未知标题").strip()
+                    pub_at = item.get("pub_at") or "未知日期"
+                    print(f"✅ {title} {pub_at}")
+            else:
+                print("⚠️  未解析到可展示的页面最新条目")
+        else:
+            print(f"❌ {name}爬虫：执行失败 - {result.get('error_message', '未知错误')}")
+
+        storage_status = storage_result.get("status")
+        storage_message = storage_result.get("message") or "未获得 Supabase 写入状态"
+        if storage_status == "success":
+            print(f"✅ {name}：{storage_message}")
+        elif storage_status == "dry_run":
+            print(f"🧪 {name}：{storage_message}")
+        elif storage_status == "error":
+            print(f"❌ {name}：{storage_message}")
+        else:
+            print(f"⚠️  {name}：{storage_message}")
+
+        if isinstance(api_result, dict):
+            api_status = api_result.get("status")
+            api_message = api_result.get("message") or "未获得 API 推送详情"
+            if api_status == "success":
+                print(f"✅ {name}：{api_message}")
+            elif api_status in {"dry_run", "skipped"}:
+                print(f"🧪 {name}：{api_message}")
+            else:
+                print(f"❌ {name}：{api_message}")
+        else:
+            print(f"⚠️  {name}：没有 API 推送记录")
+
+        print(f"💾 写入数据库: {result.get('write_count', 0)} 条")
 
         errors = []
         if result.get("error_message"):
             errors.append(result["error_message"])
         errors.extend((metrics.get("errors") or [])[:3])
         if errors:
-            print("  errors:")
+            print("⚠️  运行诊断：")
             for error in errors[:3]:
-                print(f"    - {str(error)[:220]}")
+                print(f"   - {str(error)[:220]}")
 
         if self.verbose_crawler_log and crawler_output.strip():
-            print("  raw_log:")
+            print("🧾 原始爬虫日志：")
             for line in crawler_output.strip().splitlines()[:80]:
-                print(f"    {line}")
+                print(f"   {line}")
             if len(crawler_output.strip().splitlines()) > 80:
-                print("    ... raw log truncated")
+                print("   ... 原始日志已截断")
+        print("-" * 40)
 
     def run_all_crawlers(self):
         """执行所有爬虫
@@ -154,6 +184,7 @@ class CrawlerManager:
         for index, (name, crawler_func, target_url) in enumerate(self.crawlers, 1):
             start_time = time.time()
             crawler_output = ""
+            self._print_crawler_header(name, target_url)
 
             try:
                 # 创建临时输出缓冲区，用于捕获当前爬虫的输出
@@ -179,6 +210,8 @@ class CrawlerManager:
                 adapted_result = adapt_legacy_result(result, crawler_output, name)
                 data_list = adapted_result["items"]
                 metrics = adapted_result["metrics"]
+                latest_items = adapted_result.get("latest_items") or []
+                storage_result = adapted_result.get("storage_result") or {}
                 api_push_result = adapted_result.get("api_push_result")
 
                 global_duplicate_count = 0
@@ -191,7 +224,9 @@ class CrawlerManager:
                 metrics["duplicate_policy_count"] = metrics.get("duplicate_policy_count", 0) + global_duplicate_count
 
                 crawl_count = metrics.get("target_date_count", len(data_list))
-                write_count = len(data_list) - global_duplicate_count
+                write_count = storage_result.get("saved_count")
+                if not isinstance(write_count, int):
+                    write_count = len(data_list) - global_duplicate_count
                 filter_count = metrics.get("filtered_count", 0)
 
                 self.results[name] = {
@@ -199,15 +234,17 @@ class CrawlerManager:
                     'crawl_count': crawl_count,
                     'write_count': write_count,
                     'filter_count': filter_count,
+                    'latest_items': latest_items,
                     'metrics': metrics,
                     'execution_time': round(execution_time, 2),
                     'timestamp': datetime.now().isoformat(),
                     'target_url': target_url,
+                    'storage_result': storage_result,
                     'api_push_result': api_push_result,
                     'raw_log_line_count': len(crawler_output.splitlines()),
                 }
 
-                self._print_crawler_result(index, total_crawlers, name, self.results[name], crawler_output)
+                self._print_crawler_result(name, self.results[name], crawler_output)
 
             except Exception as e:
                 if sys.stdout is not dual_out:
@@ -240,10 +277,16 @@ class CrawlerManager:
                     'execution_time': round(execution_time, 2),
                     'timestamp': datetime.now().isoformat(),
                     'target_url': target_url,
+                    'latest_items': [],
+                    'storage_result': {
+                        'status': 'error',
+                        'saved_count': 0,
+                        'message': '爬虫执行失败，未写入 Supabase',
+                    },
                     'raw_log_line_count': len(crawler_output.splitlines()),
                 }
 
-                self._print_crawler_result(index, total_crawlers, name, self.results[name], crawler_output)
+                self._print_crawler_result(name, self.results[name], crawler_output)
 
         total_execution_time = time.time() - total_start_time
         end_datetime = datetime.now()
@@ -339,7 +382,9 @@ class CrawlerManager:
             print(f"[WARN] 推送每日状态数据时发生错误：{e}")
 
         # 发送飞书通知
-        if send_crawler_result and os.getenv("FEISHU_BOT_WEBHOOK"):
+        if not feishu_notify_enabled():
+            print("\n[FEISHU] skipped: 飞书结果提醒开关未开启")
+        elif send_crawler_result and os.getenv("FEISHU_BOT_WEBHOOK"):
             print("\n[FEISHU] 正在发送飞书通知...")
             send_crawler_result(self.results, start_datetime, end_datetime, full_log)
         else:
@@ -673,6 +718,17 @@ if __name__ == "__main__":
         manager.register_crawler("江苏省农业农村厅_通知公告", jiangsu_agriculture_crawler.run, jiangsu_agriculture_crawler)
     except ImportError as e:
         print(f"[WARN]  导入江苏省农业农村厅_通知公告爬虫失败: {e}")
+
+    # 导入江苏省粮食和物资储备局信息公开爬虫
+    try:
+        from Jiangsu import jiangsu_lsj_xxgk_crawler
+        manager.register_crawler(
+            "江苏省粮食和物资储备局_信息公开",
+            jiangsu_lsj_xxgk_crawler.run,
+            jiangsu_lsj_xxgk_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入江苏省粮食和物资储备局_信息公开爬虫失败: {e}")
 
     # 导入江苏省教育厅政策文件爬虫
     try:

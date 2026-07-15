@@ -143,7 +143,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '中央部委',
                     'source': '国家林业和草原局'
                 }
                 policies.append(policy_data)

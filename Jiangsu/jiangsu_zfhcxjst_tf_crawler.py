@@ -150,7 +150,7 @@ def scrape_data(target_date=None):
                 'pub_at': pub_at,
                 'content': content,
                 'selected': False,
-                'category': '',
+                'category': '江苏省本级',
                 'source': '江苏省住房和城乡建设厅'
             }
 

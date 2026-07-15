@@ -124,7 +124,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '江苏省本级',
                     'source': '江苏省人社厅重大民生信息'
                 }
                 policies.append(policy_data)

@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from io import StringIO
 
-from crawler_core import external_send_enabled
+from crawler_core import feishu_notify_enabled
 
 
 class OutputCapturer:
@@ -46,14 +46,14 @@ class FeishuNotifier:
             webhook_url: 飞书机器人 webhook 地址，如果为 None 则从环境变量 FEISHU_BOT_WEBHOOK 获取
         """
         self.webhook_url = webhook_url or os.getenv('FEISHU_BOT_WEBHOOK')
-        self.allow_external_send = external_send_enabled()
+        self.allow_feishu_notify = feishu_notify_enabled()
         self.enabled = bool(self.webhook_url)
         self.output_capturer = OutputCapturer()
 
         if not self.enabled:
             print("⚠️  飞书机器人未配置（FEISHU_BOT_WEBHOOK 环境变量未设置）")
-        elif not self.allow_external_send:
-            print("🧪 飞书通知处于 DRY-RUN：不会真实发送。设置 POLICYCLAW_ENABLE_EXTERNAL_SEND=1 后才会发送。")
+        elif not self.allow_feishu_notify:
+            print("🧪 飞书通知已关闭，不会真实发送。设置 POLICYCLAW_ENABLE_FEISHU_NOTIFY=1 后才会发送。")
 
     def start_capture(self):
         """开始捕获控制台输出"""
@@ -276,7 +276,7 @@ class FeishuNotifier:
         Returns:
             bool: 是否发送成功
         """
-        if not self.allow_external_send:
+        if not self.allow_feishu_notify:
             print("🧪 DRY-RUN：已生成飞书消息 payload，未真实发送。")
             return True
 

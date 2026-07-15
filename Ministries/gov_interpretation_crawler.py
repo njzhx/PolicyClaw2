@@ -107,7 +107,7 @@ def scrape_data():
                                         'pub_at': pub_at,
                                         'content': content,
                                         'selected': False,
-                                        'category': '',
+                                        'category': '中央部委',
                                         'source': '中国政府网政策解读'
                                     }
                                     json_policies.append(policy_data)

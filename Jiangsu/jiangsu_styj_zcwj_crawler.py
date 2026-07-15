@@ -117,7 +117,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '江苏省本级',
                     'source': '江苏省体育局政策文件'
                 }
                 policies.append(policy_data)

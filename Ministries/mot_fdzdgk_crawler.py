@@ -111,7 +111,7 @@ def scrape_data():
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '中央部委',
                     'source': '交通运输部政府信息公开'
                 }
                 policies.append(policy_data)

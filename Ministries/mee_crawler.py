@@ -126,7 +126,7 @@ def scrape_data(source_name, url):
                     'pub_at': pub_at,
                     'content': content,
                     'selected': False,
-                    'category': '',
+                    'category': '中央部委',
                     'source': f'生态环境部_{source_name}'
                 }
 

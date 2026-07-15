@@ -1,16 +1,15 @@
-name: 政策爬虫（日常滑动窗口）
+name: 政策爬虫（日期段补跑）
 
 on:
-  # schedule:
-  #   - cron: '0 19 * * *'
-  #   - cron: '0 22 * * *'
-  #   - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
-      crawl_window_days:
-        description: '滑动窗口天数'
+      crawl_date_from:
+        description: '补跑开始日期（YYYY-MM-DD）'
         required: true
-        default: '7'
+        type: string
+      crawl_date_to:
+        description: '补跑结束日期（YYYY-MM-DD）'
+        required: true
         type: string
       enable_supabase_write:
         description: '是否写入 Supabase'
@@ -37,10 +36,11 @@ jobs:
   crawl:
     uses: ./.github/workflows/crawler-common.yml
     with:
-      crawl_mode: sliding_window
-      crawl_window_days: ${{ inputs.crawl_window_days || '7' }}
-      enable_supabase_write: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_supabase_write }}
-      enable_api_push: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_api_push }}
-      enable_feishu_notify: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_feishu_notify }}
-      verbose_crawler_log: ${{ inputs.verbose_crawler_log || false }}
+      crawl_mode: date_range
+      crawl_date_from: ${{ inputs.crawl_date_from }}
+      crawl_date_to: ${{ inputs.crawl_date_to }}
+      enable_supabase_write: ${{ inputs.enable_supabase_write }}
+      enable_api_push: ${{ inputs.enable_api_push }}
+      enable_feishu_notify: ${{ inputs.enable_feishu_notify }}
+      verbose_crawler_log: ${{ inputs.verbose_crawler_log }}
     secrets: inherit
