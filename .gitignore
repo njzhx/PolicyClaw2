@@ -18,6 +18,7 @@ Thumbs.db
 
 # 你的本地临时文件
 .trae/
+AGENTS.md
 daily_status_api.md
 json_structure.md
 改进建议.md
