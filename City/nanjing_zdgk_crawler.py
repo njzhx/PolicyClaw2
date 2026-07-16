@@ -98,24 +98,26 @@ def scrape_data():
                     metrics.invalid_item_count += 1
                     continue
 
-                # 解析日期：从链接文本或同级元素中提取
-                # 格式如：标题  否2026-07-01 或 标题  是2031-05-012026-03-23
-                full_text = node.get_text()
-                date_match = None
-                for pattern in [r"(\d{4}-\d{2}-\d{2})", r"(\d{4}年\d{1,2}月\d{1,2}日)"]:
+                # 优先从列表页专门的日期节点获取发布日期（<span class="d2">）
+                date_elem = node.select_one("span.d2")
+                pub_at = None
+
+                if date_elem:
+                    # 使用列表页明确的日期节点
+                    date_text = date_elem.get_text(strip=True)
+                    pub_at = parse_date(date_text)
+                else:
+                    # 备用：从整个节点文本中查找日期（但不能是失效日期等）
                     import re
-                    date_match = re.search(pattern, full_text)
+                    full_text = node.get_text()
+                    # 尝试匹配标准格式
+                    date_match = re.search(r"(\d{4}-\d{2}-\d{2})", full_text)
                     if date_match:
-                        break
+                        pub_at = parse_date(date_match.group(1))
 
-                if not date_match:
-                    metrics.invalid_item_count += 1
-                    metrics.errors.append(f"无法解析日期: {title[:30]}...")
-                    continue
-
-                pub_at = parse_date(date_match.group(1))
                 if not pub_at:
                     metrics.invalid_item_count += 1
+                    metrics.errors.append(f"无法解析日期: {title[:30]}...")
                     continue
 
                 article_url = urljoin(TARGET_URL, href)
