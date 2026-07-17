@@ -27,6 +27,11 @@ on:
         required: false
         default: ''
         type: string
+      crawler_files:
+        description: '指定爬虫文件，多个用英文逗号分隔；留空运行全部'
+        required: false
+        default: ''
+        type: string
       enable_supabase_write:
         description: '是否写入 Supabase'
         required: false
@@ -142,6 +147,7 @@ jobs:
           CRAWL_DATE_FROM: ${{ inputs.crawl_date_from }}
           CRAWL_DATE_TO: ${{ inputs.crawl_date_to }}
           CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days }}
+          POLICYCLAW_CRAWLER_FILES: ${{ inputs.crawler_files }}
           SUPABASE_PROJECT_URL: ${{ secrets.SUPABASE_PROJECT_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_TABLE: policyclaw2

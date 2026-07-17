@@ -7,6 +7,11 @@ on:
         description: '补跑日期（YYYY-MM-DD）'
         required: true
         type: string
+      crawler_files:
+        description: '指定爬虫文件（留空运行全部；多个用英文逗号分隔）'
+        required: false
+        default: ''
+        type: string
       enable_supabase_write:
         description: '是否写入 Supabase'
         required: false
@@ -34,6 +39,7 @@ jobs:
     with:
       crawl_mode: single_date
       crawl_date: ${{ inputs.crawl_date }}
+      crawler_files: ${{ inputs.crawler_files }}
       enable_supabase_write: ${{ inputs.enable_supabase_write }}
       enable_api_push: ${{ inputs.enable_api_push }}
       enable_feishu_notify: ${{ inputs.enable_feishu_notify }}

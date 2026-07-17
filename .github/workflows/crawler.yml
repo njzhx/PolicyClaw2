@@ -12,6 +12,11 @@ on:
         required: true
         default: '7'
         type: string
+      crawler_files:
+        description: '指定爬虫文件（留空运行全部；多个用英文逗号分隔）'
+        required: false
+        default: ''
+        type: string
       enable_supabase_write:
         description: '是否写入 Supabase'
         required: false
@@ -39,6 +44,7 @@ jobs:
     with:
       crawl_mode: sliding_window
       crawl_window_days: ${{ inputs.crawl_window_days || '7' }}
+      crawler_files: ${{ inputs.crawler_files || '' }}
       enable_supabase_write: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_supabase_write }}
       enable_api_push: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_api_push }}
       enable_feishu_notify: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_feishu_notify }}

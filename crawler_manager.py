@@ -47,12 +47,36 @@ class CrawlerManager:
         self.crawlers = []
         self.results = {}
         self.seen_policy_keys = set()
+        self.requested_crawler_files = self._parse_crawler_file_selection(
+            os.getenv("POLICYCLAW_CRAWLER_FILES", "")
+        )
+        self.available_crawler_files = {}
         self.verbose_crawler_log = os.getenv("POLICYCLAW_VERBOSE_CRAWLER_LOG", "").strip().lower() in {
             "1",
             "true",
             "yes",
             "on",
         }
+
+    @staticmethod
+    def _parse_crawler_file_selection(raw_value):
+        """解析逗号分隔的爬虫文件名，并拒绝路径和通配符。"""
+        requested = {}
+        for raw_token in str(raw_value or "").split(","):
+            file_name = raw_token.strip()
+            if not file_name:
+                continue
+            if any(char in file_name for char in ("/", "\\", "*", "?", "[", "]")):
+                raise ValueError(
+                    f"指定爬虫只能填写文件名，不能包含路径或通配符: {file_name}"
+                )
+            normalized = file_name.casefold()
+            if not normalized.endswith("_crawler.py"):
+                raise ValueError(
+                    f"指定爬虫文件名必须以 _crawler.py 结尾: {file_name}"
+                )
+            requested.setdefault(normalized, file_name)
+        return requested
 
     def register_crawler(self, name, crawler_func, crawler_module):
         """注册爬虫
@@ -62,6 +86,18 @@ class CrawlerManager:
             crawler_func: 爬虫执行函数
             crawler_module: 爬虫模块对象，用于获取 TARGET_URL
         """
+        module_path = str(getattr(crawler_module, "__file__", "") or "")
+        module_name = str(getattr(crawler_module, "__name__", "") or "")
+        file_name = os.path.basename(module_path) or f"{module_name.rsplit('.', 1)[-1]}.py"
+        normalized_file_name = file_name.casefold()
+        self.available_crawler_files.setdefault(normalized_file_name, set()).add(module_name)
+
+        if (
+            self.requested_crawler_files
+            and normalized_file_name not in self.requested_crawler_files
+        ):
+            return
+
         target_url = getattr(crawler_module, 'TARGET_URL', '')
         self.crawlers.append((name, crawler_func, target_url))
         if self.verbose_crawler_log:
@@ -69,6 +105,39 @@ class CrawlerManager:
                 print(f"[REGISTER] {name} ({target_url})")
             else:
                 print(f"[REGISTER] {name}")
+
+    def validate_crawler_selection(self):
+        """在所有模块注册后校验指定文件，并输出本次筛选结果。"""
+        if not self.requested_crawler_files:
+            print("[FILTER] 未指定爬虫文件，本次运行全部爬虫")
+            return
+
+        unknown = [
+            original
+            for normalized, original in self.requested_crawler_files.items()
+            if normalized not in self.available_crawler_files
+        ]
+        ambiguous = {
+            self.requested_crawler_files[normalized]: modules
+            for normalized, modules in self.available_crawler_files.items()
+            if normalized in self.requested_crawler_files and len(modules) > 1
+        }
+        if unknown or ambiguous:
+            messages = []
+            if unknown:
+                messages.append(
+                    "未找到或未成功注册以下爬虫文件: " + ", ".join(unknown)
+                )
+            for file_name, modules in ambiguous.items():
+                messages.append(
+                    f"爬虫文件名存在跨模块歧义: {file_name} -> "
+                    + ", ".join(sorted(modules))
+                )
+            raise ValueError("；".join(messages))
+
+        selected_names = list(self.requested_crawler_files.values())
+        print(f"[FILTER] 指定爬虫文件: {', '.join(selected_names)}")
+        print(f"[CRAWLERS] 本次执行爬虫入口: {len(self.crawlers)} 个")
 
     def _metric_health(self, result):
         if result.get("status") == "error":
@@ -411,7 +480,11 @@ class CrawlerManager:
 # ==========================================
 if __name__ == "__main__":
     # 创建爬虫管理器
-    manager = CrawlerManager()
+    try:
+        manager = CrawlerManager()
+    except ValueError as exc:
+        print(f"[ERROR] 指定爬虫参数无效: {exc}")
+        raise SystemExit(2)
 
     # 注册爬虫
     # 注意：这里需要根据实际爬虫模块进行导入和注册
@@ -1079,6 +1152,12 @@ if __name__ == "__main__":
         manager.register_crawler("国家能源局_最新文件", nea_zxwj_crawler.run, nea_zxwj_crawler)
     except ImportError as e:
         print(f"[WARN]  导入国家能源局最新文件爬虫失败: {e}")
+
+    try:
+        manager.validate_crawler_selection()
+    except ValueError as exc:
+        print(f"[ERROR] 指定爬虫参数无效: {exc}")
+        raise SystemExit(2)
 
     # 执行所有爬虫
     if manager.crawlers:
