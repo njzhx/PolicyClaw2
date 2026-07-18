@@ -210,7 +210,13 @@ class DBUtils:
             print(f"[DRY-RUN] {source_name}：{message}")
             return {"status": "skipped", "message": message}
 
-        target_url = "http://47.114.109.178:5000/api/receive-data"
+        vps_ip = os.getenv("VPS_IP", "").strip()
+        if not vps_ip:
+            message = "VPS_IP 环境变量未设置，跳过 API 推送"
+            print(f"⚠️  {source_name}：{message}。")
+            return {"status": "skipped", "message": message}
+
+        target_url = f"http://{vps_ip}:5000/api/receive-data"
 
         try:
             # 构造JSON结构（按照接口示例格式）
@@ -278,8 +284,6 @@ class DBUtils:
         Returns:
             dict: 推送结果，包含status和message
         """
-        target_url = "http://47.114.109.178:5000/api/receive-daily-status"
-
         try:
             # 使用东八区时间作为date
             # 如果没有提供date_str，则使用当前东八区日期
@@ -302,6 +306,14 @@ class DBUtils:
                 )
                 print(f"[DRY-RUN] {message}")
                 return {"status": "dry_run", "message": message, "payload": payload}
+
+            vps_ip = os.getenv("VPS_IP", "").strip()
+            if not vps_ip:
+                message = "VPS_IP 环境变量未设置，跳过每日状态推送"
+                print(f"⚠️  {message}。")
+                return {"status": "skipped", "message": message}
+
+            target_url = f"http://{vps_ip}:5000/api/receive-daily-status"
 
             # 发送POST请求
             headers = {"Content-Type": "application/json; charset=utf-8"}
