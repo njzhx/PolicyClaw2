@@ -569,13 +569,14 @@ if __name__ == "__main__":
     # 导入财政部多栏目爬虫
     try:
         from Ministries import mof_multi_crawler
-        manager.register_crawler("财政部经济建设司_通知公告", mof_multi_crawler.run_财政部经济建设司_通知公告, mof_multi_crawler)
-        manager.register_crawler("财政部经济建设司_政策法规", mof_multi_crawler.run_财政部经济建设司_政策法规, mof_multi_crawler)
-        manager.register_crawler("财政部农业农村司_政策发布", mof_multi_crawler.run_财政部农业农村司_政策发布, mof_multi_crawler)
-        manager.register_crawler("财政部社会保障司_工作动态", mof_multi_crawler.run_财政部社会保障司_工作动态, mof_multi_crawler)
-        manager.register_crawler("财政部科教和文化司_工作动态", mof_multi_crawler.run_财政部科教和文化司_工作动态, mof_multi_crawler)
-        manager.register_crawler("财政部科教和文化司_工作通知", mof_multi_crawler.run_财政部科教和文化司_工作通知, mof_multi_crawler)
-        manager.register_crawler("财政部科教和文化司_政策发布", mof_multi_crawler.run_财政部科教和文化司_政策发布, mof_multi_crawler)
+        manager.register_crawler("财政部经济建设司_通知公告", mof_multi_crawler.run_财政部经济建设司_通知公告, mof_multi_crawler.module_for("财政部经济建设司_通知公告"))
+        manager.register_crawler("财政部经济建设司_政策法规", mof_multi_crawler.run_财政部经济建设司_政策法规, mof_multi_crawler.module_for("财政部经济建设司_政策法规"))
+        manager.register_crawler("财政部农业农村司_政策发布", mof_multi_crawler.run_财政部农业农村司_政策发布, mof_multi_crawler.module_for("财政部农业农村司_政策发布"))
+        manager.register_crawler("财政部社会保障司_工作动态", mof_multi_crawler.run_财政部社会保障司_工作动态, mof_multi_crawler.module_for("财政部社会保障司_工作动态"))
+        manager.register_crawler("财政部社会保障司_政策发布", mof_multi_crawler.run_财政部社会保障司_政策发布, mof_multi_crawler.module_for("财政部社会保障司_政策发布"))
+        manager.register_crawler("财政部科教和文化司_工作动态", mof_multi_crawler.run_财政部科教和文化司_工作动态, mof_multi_crawler.module_for("财政部科教和文化司_工作动态"))
+        manager.register_crawler("财政部科教和文化司_工作通知", mof_multi_crawler.run_财政部科教和文化司_工作通知, mof_multi_crawler.module_for("财政部科教和文化司_工作通知"))
+        manager.register_crawler("财政部科教和文化司_政策发布", mof_multi_crawler.run_财政部科教和文化司_政策发布, mof_multi_crawler.module_for("财政部科教和文化司_政策发布"))
     except ImportError as e:
         print(f"[WARN]  导入财政部多栏目爬虫失败: {e}")
 
@@ -993,6 +994,17 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"[WARN]  导入南京市政府政策文件爬虫失败: {e}")
 
+    # 导入南京市公安局部门文件爬虫
+    try:
+        from City import nanjing_gaj_bmwj_crawler
+        manager.register_crawler(
+            "南京市公安局_部门文件",
+            nanjing_gaj_bmwj_crawler.run,
+            nanjing_gaj_bmwj_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入南京市公安局部门文件爬虫失败: {e}")
+
     # 导入交通运输部政府信息公开爬虫
     try:
         from Ministries import mot_fdzdgk_crawler
@@ -1188,14 +1200,14 @@ if __name__ == "__main__":
 
     # 导入无锡市发改委法规文件及解读爬虫
     try:
-        from City import wuxi_dpc_fgwjjd_crawler
+        from City import wuxi_dpc_fgwjjjd_crawler
         manager.register_crawler(
-            "无锡市发改委_法规文件及解读",
-            wuxi_dpc_fgwjjd_crawler.run,
-            wuxi_dpc_fgwjjd_crawler,
+            "无锡市发展和改革委员会_法规文件及解读",
+            wuxi_dpc_fgwjjjd_crawler.run,
+            wuxi_dpc_fgwjjjd_crawler,
         )
     except ImportError as e:
-        print(f"[WARN]  导入无锡市发改委_法规文件及解读爬虫失败: {e}")
+        print(f"[WARN]  导入无锡市发展和改革委员会_法规文件及解读爬虫失败: {e}")
 
     # 导入无锡市发改委公告公示爬虫
     try:

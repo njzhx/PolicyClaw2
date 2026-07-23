@@ -1,157 +1,148 @@
+import json
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
-import re
-import json
+from crawler_core import (
+    CrawlerMetrics,
+    CrawlerRunResult,
+    get_crawl_date_window,
+    is_target_date,
+    parse_date,
+)
+from db_utils import save_to_policy
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, */*',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'Referer': 'https://www.mca.gov.cn/gdnps/pc/index.jsp?mtype=1',
-}
 
 TARGET_URL = "https://www.mca.gov.cn/gdnps/searchIndex.jsp?params=%257B%2522goPage%2522%253A1%252C%2522orderBy%2522%253A%255B%257B%2522orderBy%2522%253A%2522scrq%2522%252C%2522reverse%2522%253Atrue%257D%252C%257B%2522orderBy%2522%253A%2522orderTime%2522%252C%2522reverse%2522%253Atrue%257D%255D%252C%2522pageSize%2522%253A15%252C%2522queryParam%2522%253A%255B%257B%2522shortName%2522%253A%2522ownSubjectDn%2522%252C%2522value%2522%253A%2522%252F1%252F139%252F2445%252F2575%2522%257D%252C%257B%2522shortName%2522%253A%2522fbjg%2522%252C%2522value%2522%253A%2522%252F1%252F139%252F2445%252F2575%2522%257D%252C%257B%257D%252C%257B%257D%255D%252C%2522doRepeated%2522%253A0%257D"
+SOURCE_NAME = "民政部政策文件"
+CATEGORY = "中央部委"
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    "Referer": "https://www.mca.gov.cn/gdnps/pc/index.jsp?mtype=1",
+}
+
+
+def _parse_json_payload(text):
+    payload = text.strip()
+    if payload.startswith("("):
+        payload = payload[1:]
+    if payload.endswith(")"):
+        payload = payload[:-1]
+
+    json_start = payload.find("{")
+    json_end = payload.rfind("}")
+    if json_start != -1 and json_end > json_start:
+        payload = payload[json_start : json_end + 1]
+    return json.loads(payload)
+
+
+def _parse_publish_date(record):
+    for key in ("publishTime", "scrq", "orderTime"):
+        value = record.get(key)
+        if not value:
+            continue
+        text = str(value).strip()
+        if len(text) >= 8 and text[:8].isdigit():
+            parsed = parse_date(f"{text[:4]}-{text[4:6]}-{text[6:8]}")
+        else:
+            parsed = parse_date(text)
+        if parsed:
+            return parsed
+    return None
+
+
+def _extract_content(record):
+    html_content = record.get("htmlContent") or record.get("content") or ""
+    if not html_content:
+        return ""
+    soup = BeautifulSoup(html_content, "html.parser")
+    return soup.get_text("\n", strip=True)
+
+
+def _record_url(record):
+    href = str(record.get("url") or "").strip()
+    if href:
+        return urljoin("https://www.mca.gov.cn/", href)
+    record_id = str(record.get("id") or "").strip()
+    if record_id:
+        return f"https://www.mca.gov.cn/gdnps/pc/content.jsp?id={record_id}"
+    return ""
 
 
 def scrape_data():
     policies = []
-    all_items = []
+    latest_items = []
+    metrics = CrawlerMetrics()
+    target_from, target_to = get_crawl_date_window()
 
     try:
-        target_date_from, target_date_to = get_crawl_date_window()
-        target_date_label = format_date_window(target_date_from, target_date_to)
-        today = datetime.now(timezone(timedelta(hours=8))).date()
-
-        print(f"📅 运行日期（北京时间）：{today}")
-        print(f"🎯 目标抓取日期：{target_date_label}")
-
-        print("正在从API获取数据...")
-        response = requests.get(TARGET_URL, headers=headers, timeout=30)
+        response = requests.get(TARGET_URL, headers=HEADERS, timeout=30)
         response.raise_for_status()
+        data = _parse_json_payload(response.text)
+        records = data.get("resultMap") or []
+        metrics.raw_item_count = len(records)
 
-        # Parse JSON response
-        text = response.text.strip()
-        if text.startswith('('):
-            text = text[1:]
-        if text.endswith(')'):
-            text = text[:-1]
+        if not records:
+            metrics.errors.append("API 未返回 resultMap 数据")
 
-        json_start = text.find('{')
-        json_end = text.rfind('}')
-        if json_start != -1 and json_end != -1 and json_end > json_start:
-            text = text[json_start:json_end + 1]
-
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as e:
-            pos = e.pos
-            start = max(0, pos - 50)
-            end = min(len(text), pos + 50)
-            context = text[start:end]
-            print(f"❌ JSON解析失败 - 错误位置附近: ...{context}...")
-            raise
-        all_records = data.get('resultMap', [])
-        print(f"📋 API返回 {len(all_records)} 条数据")
-
-        filtered_count = 0
-
-        for record in all_records:
+        for record in records:
             try:
-                title = record.get('title', '')
-                publish_time_str = record.get('publishTime', '')
-                html_content = record.get('htmlContent', '')
+                title = str(record.get("title") or "").strip()
+                article_url = _record_url(record)
+                pub_at = _parse_publish_date(record)
 
-                if not title:
+                if not title or not article_url or not pub_at:
+                    metrics.invalid_item_count += 1
+                    metrics.errors.append(
+                        f"API记录核心字段缺失: {title or article_url or '未知条目'}"
+                    )
                     continue
 
-                # Parse publishTime: "20260429095000" -> date
-                pub_at = None
-                if publish_time_str:
-                    try:
-                        # Format: YYYYMMDDHHmmss
-                        pub_at = datetime.strptime(publish_time_str[:8], '%Y%m%d').date()
-                    except ValueError:
-                        pass
+                metrics.valid_item_count += 1
+                latest_items.append({"title": title, "pub_at": pub_at})
 
-                all_items.append({'title': title, 'pub_at': pub_at})
-
-                if not is_target_date(pub_at, target_date_from, target_date_to):
-                    filtered_count += 1
+                if not is_target_date(pub_at, target_from, target_to):
+                    metrics.filtered_count += 1
                     continue
 
-                # Extract text from HTML content
-                content = ""
-                if html_content:
-                    content_soup = BeautifulSoup(html_content, 'html.parser')
-                    content = content_soup.get_text(separator='\n', strip=True)
+                policies.append(
+                    {
+                        "title": title,
+                        "url": article_url,
+                        "pub_at": pub_at,
+                        "content": _extract_content(record),
+                        "selected": False,
+                        "category": CATEGORY,
+                        "source": SOURCE_NAME,
+                    }
+                )
+            except Exception as exc:
+                metrics.invalid_item_count += 1
+                metrics.errors.append(f"API记录解析失败: {exc}")
+    except Exception as exc:
+        metrics.errors.append(f"API抓取失败: {exc}")
 
-                # Build URL from record
-                url = f"https://www.mca.gov.cn{record.get('url', '')}"
-
-                policy_data = {
-                    'title': title,
-                    'url': url,
-                    'pub_at': pub_at,
-                    'content': content,
-                    'selected': False,
-                    'category': '中央部委',
-                    'source': '民政部政策文件'
-                }
-
-                policies.append(policy_data)
-
-            except Exception as e:
-                print(f"⚠️  单条数据处理失败 - {e}")
-                continue
-
-        print(f"\n✅ 民政部政策文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
-        print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-
-        if all_items:
-            print(f"\n📊 页面最新5条是：")
-            sorted_items = sorted(all_items, key=lambda x: x['pub_at'] or datetime.min.date(), reverse=True)
-            for i, item in enumerate(sorted_items[:5], 1):
-                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
-                title = item['title'][:50]
-                print(f"✅ {title}... {date_str}")
-
-    except Exception as e:
-        print(f"❌ 民政部政策文件爬虫：抓取失败 - {e}")
-        print("----------------------------------------")
-
-    return policies, all_items
-
-
-def save_to_supabase(data_list):
-    try:
-        from db_utils import save_to_policy
-        return save_to_policy(data_list, "民政部政策文件")
-    except Exception as e:
-        print(f"Error saving to database: {e}")
-        return data_list, None
+    metrics.target_date_count = len(policies)
+    metrics.empty_content_count = sum(1 for item in policies if not item.get("content"))
+    return policies, latest_items[:5], metrics
 
 
 def run():
-    try:
-        data, _ = scrape_data()
-        if data:
-            result, api_push_result = save_to_supabase(data)
-            print(f"\n💾 写入数据库: {len(result)} 条")
-            print("----------------------------------------")
-            print("✅ 爬虫 民政部政策文件 执行成功")
-            return result, api_push_result
-        else:
-            print(f"\n💾 写入数据库: 0 条")
-            print("----------------------------------------")
-            print("⚠️  未找到目标日期的文章")
-            return [], None
-    except Exception as e:
-        print(f"❌ 爬虫 民政部政策文件 运行失败 - {e}")
-        print("----------------------------------------")
-        return [], None
+    data, latest_items, metrics = scrape_data()
+    processed_items, api_push_result = save_to_policy(data, SOURCE_NAME)
+    return CrawlerRunResult(
+        items=processed_items,
+        latest_items=latest_items,
+        metrics=metrics,
+        api_push_result=api_push_result,
+    )
 
 
 if __name__ == "__main__":
