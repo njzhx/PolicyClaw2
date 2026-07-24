@@ -1209,6 +1209,28 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"[WARN]  导入无锡市发展和改革委员会_法规文件及解读爬虫失败: {e}")
 
+    # 导入无锡市数据局法规政策与文件爬虫
+    try:
+        from City import wuxi_sjj_fgwjjjd_crawler
+        manager.register_crawler(
+            "无锡市数据局_法规政策与文件",
+            wuxi_sjj_fgwjjjd_crawler.run,
+            wuxi_sjj_fgwjjjd_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入无锡市数据局_法规政策与文件爬虫失败: {e}")
+
+    # 导入无锡市数据局规划计划爬虫
+    try:
+        from City import wuxi_sjj_ghjh_crawler
+        manager.register_crawler(
+            "无锡市数据局_规划计划",
+            wuxi_sjj_ghjh_crawler.run,
+            wuxi_sjj_ghjh_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入无锡市数据局_规划计划爬虫失败: {e}")
+
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:
