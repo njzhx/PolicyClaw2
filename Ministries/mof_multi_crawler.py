@@ -1,5 +1,6 @@
 from urllib.parse import urljoin
 from types import SimpleNamespace
+import time
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,6 +18,9 @@ from db_utils import save_to_policy
 TARGET_URL = "https://www.mof.gov.cn/"
 CATEGORY = "中央部委"
 MAX_PAGES = 20
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+LIST_RETRY_DELAYS = (3, 8, 15)
+DETAIL_RETRY_DELAYS = (2, 5, 10)
 
 HEADERS = {
     "User-Agent": (
@@ -77,6 +81,35 @@ def _page_url(base_url, page_index):
     return urljoin(base_url, f"index_{page_index}.htm")
 
 
+def _get_with_retries(session, url, timeout, retry_delays, metrics, label):
+    attempts = len(retry_delays) + 1
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            response = session.get(url, headers=HEADERS, timeout=timeout)
+            if response.status_code == 404:
+                return response
+            if response.status_code in RETRY_STATUS_CODES and attempt < attempts - 1:
+                last_error = requests.HTTPError(
+                    f"{response.status_code} Server Error for url: {response.url}",
+                    response=response,
+                )
+            else:
+                response.raise_for_status()
+                return response
+        except requests.RequestException as exc:
+            last_error = exc
+
+        if attempt < attempts - 1:
+            delay = retry_delays[attempt]
+            metrics.errors.append(
+                f"{label}第{attempt + 1}次失败，{delay}秒后重试: {url} - {last_error}"
+            )
+            time.sleep(delay)
+
+    raise last_error
+
+
 def _extract_list_items(soup, page_url, metrics):
     ul_element = soup.select_one("ul.liBox")
     if not ul_element:
@@ -115,8 +148,14 @@ def _extract_list_items(soup, page_url, metrics):
 
 def _extract_content(session, article_url, metrics):
     try:
-        response = session.get(article_url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
+        response = _get_with_retries(
+            session,
+            article_url,
+            timeout=15,
+            retry_delays=DETAIL_RETRY_DELAYS,
+            metrics=metrics,
+            label="详情页抓取",
+        )
         soup = BeautifulSoup(response.content, "html.parser")
         content_element = (
             soup.find("div", class_="TRS_Editor")
@@ -149,10 +188,16 @@ def scrape_single_config(config):
         for page_index in range(MAX_PAGES):
             page_url = _page_url(config["url"], page_index)
             try:
-                response = session.get(page_url, headers=HEADERS, timeout=30)
+                response = _get_with_retries(
+                    session,
+                    page_url,
+                    timeout=30,
+                    retry_delays=LIST_RETRY_DELAYS,
+                    metrics=metrics,
+                    label="列表页抓取",
+                )
                 if response.status_code == 404:
                     break
-                response.raise_for_status()
             except Exception as exc:
                 if page_index == 0:
                     metrics.errors.append(f"列表页抓取失败: {page_url} - {exc}")
