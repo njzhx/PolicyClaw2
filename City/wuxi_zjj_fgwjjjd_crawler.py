@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 """
-无锡市民族宗教事务局 - 法规文件及解读
-目标网址: https://zjj.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml
+无锡市住房和城乡建设局 - 法规文件及解读
+目标网址: https://js.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml
 """
 import re
 from html.parser import HTMLParser
@@ -16,8 +17,8 @@ from crawler_core import (
 )
 from db_utils import save_to_policy
 
-TARGET_URL = "https://zjj.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
-SOURCE_NAME = "无锡市民族宗教事务局_法规文件及解读"
+TARGET_URL = "https://js.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
+SOURCE_NAME = "无锡市住房和城乡建设局_法规文件及解读"
 CATEGORY = "无锡"
 
 HEADERS = {
@@ -28,6 +29,9 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
+
+# 允许的域名，防止抓取外部链接
+ALLOWED_HOST = "js.wuxi.gov.cn"
 
 
 def _fetch_with_retry(url, max_retries=3, timeout=30):
@@ -45,13 +49,12 @@ def _fetch_with_retry(url, max_retries=3, timeout=30):
 class _ListParser(HTMLParser):
     """解析列表页，提取 (title, href, raw_date) 三元组。
 
-    HTML结构:
-    <ul id="doclist" class="pd20">
+    列表结构:
+    <ul class="list">
         <li>
-            <a target="_blank" title="标题" href="/doc/2026/05/15/4775855.shtml">标题</a>
-            <span>2026-05-15</span>
+            <a target="_blank" title="标题" href="/doc/2026/07/15/4805858.shtml">标题</a>
+            <span class="date">2026-07-15</span>
         </li>
-        ...
     </ul>
     """
 
@@ -60,7 +63,7 @@ class _ListParser(HTMLParser):
         self.records = []
         self._in_li = False
         self._in_anchor = False
-        self._in_date_span = False
+        self._in_span = False
         self._current_href = None
         self._current_title = None
         self._current_date = None
@@ -76,14 +79,14 @@ class _ListParser(HTMLParser):
             self._in_anchor = True
             self._current_href = attrs_dict.get("href", "").strip()
         elif tag == "span":
-            self._in_date_span = True
+            self._in_span = True
 
     def handle_data(self, data):
         if self._in_anchor and self._current_title is None:
             text = data.strip()
             if text:
                 self._current_title = text
-        elif self._in_date_span:
+        elif self._in_span:
             text = data.strip()
             # 匹配 YYYY-MM-DD 格式
             if re.match(r"^\d{4}-\d{2}-\d{2}$", text):
@@ -93,7 +96,7 @@ class _ListParser(HTMLParser):
         if tag == "a" and self._in_anchor:
             self._in_anchor = False
         elif tag == "span":
-            self._in_date_span = False
+            self._in_span = False
         elif tag == "li" and self._in_li:
             self._in_li = False
             if self._current_title and self._current_href and self._current_date:
@@ -103,14 +106,10 @@ class _ListParser(HTMLParser):
 
 
 class _ContentParser(HTMLParser):
-    """提取详情页正文：<div id="Zoom"> 内的段落文本。
+    """提取详情页正文：<div class="detail_content"> 内的段落文本。
 
     HTML结构:
-    <div class="explain clearfix">
-        <span class="fl">发布时间：2026-05-15  09:33</span>
-        ...
-    </div>
-    <div id="Zoom">
+    <div class="detail_content">
         <p>正文内容...</p>
         ...
     </div>
@@ -125,7 +124,7 @@ class _ContentParser(HTMLParser):
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
         if not self._capturing:
-            if tag == "div" and attrs_dict.get("id") == "Zoom":
+            if tag == "div" and attrs_dict.get("class") == "detail_content":
                 self._capturing = True
                 self._depth = 1
                 return
@@ -149,6 +148,7 @@ class _ContentParser(HTMLParser):
 
 
 def _extract_content(article_url, metrics):
+    """抓取并解析详情页正文。"""
     try:
         html = _fetch_with_retry(article_url, timeout=15)
         parser = _ContentParser()
@@ -201,6 +201,11 @@ def scrape_data():
                         )
                         continue
 
+                    # 只处理同域名链接
+                    if ALLOWED_HOST not in href and not href.startswith("/"):
+                        metrics.invalid_item_count += 1
+                        continue
+
                     article_url = urljoin(TARGET_URL, href)
 
                     # 去重
@@ -236,7 +241,7 @@ def scrape_data():
             # 分页提前终止：当前页最旧日期已早于目标窗口起始日期
             if oldest_date_on_page and oldest_date_on_page < target_from:
                 break
-            # 不足整页时终止
+            # 不足整页时终止（每页20条）
             if page_raw_count < 20:
                 break
             page_index += 1
