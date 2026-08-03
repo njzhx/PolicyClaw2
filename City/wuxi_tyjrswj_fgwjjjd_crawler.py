@@ -1,7 +1,11 @@
+"""
+无锡市退役军人事务局 - 法规文件及解读
+目标URL: https://tyjrswj.wuxi.gov.cn/gkx/xxgkml/fgwjjjd/index.shtml
+"""
+
 import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin
-from urllib.request import Request, urlopen
 
 from crawler_core import (
     CrawlerMetrics,
@@ -12,8 +16,8 @@ from crawler_core import (
 )
 from db_utils import save_to_policy
 
-TARGET_URL = "https://dpc.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
-SOURCE_NAME = "无锡市发展和改革委员会_法规文件及解读"
+TARGET_URL = "https://tyjrswj.wuxi.gov.cn/gkx/xxgkml/fgwjjjd/index.shtml"
+SOURCE_NAME = "无锡市退役军人事务局_法规文件及解读"
 CATEGORY = "无锡"
 
 HEADERS = {
@@ -28,6 +32,7 @@ HEADERS = {
 
 def _fetch_with_retry(url, max_retries=3, timeout=30):
     """GET 请求，最多重试 max_retries 次。"""
+    from urllib.request import Request, urlopen
     for attempt in range(1, max_retries + 1):
         try:
             req = Request(url, headers=HEADERS)
@@ -39,11 +44,12 @@ def _fetch_with_retry(url, max_retries=3, timeout=30):
 
 
 class _ListParser(HTMLParser):
-    """解析列表页，提取 (title, href, pub_at) 三元组。"""
+    """解析列表页，提取 (title, href, raw_date) 三元组。"""
 
     def __init__(self):
         super().__init__()
         self.records = []
+        self._in_doclist = False
         self._in_li = False
         self._in_anchor = False
         self._current_href = None
@@ -52,7 +58,9 @@ class _ListParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
-        if tag == "li":
+        if tag == "ul" and attrs_dict.get("id") == "doclist":
+            self._in_doclist = True
+        elif self._in_doclist and tag == "li":
             self._in_li = True
             self._current_href = None
             self._current_title = None
@@ -60,15 +68,20 @@ class _ListParser(HTMLParser):
         elif self._in_li and tag == "a":
             self._in_anchor = True
             self._current_href = attrs_dict.get("href", "").strip()
+            self._current_title = attrs_dict.get("title", "").strip()
+        elif tag == "span" and self._in_li and not self._in_anchor:
+            # span 中的日期将在 handle_data 中处理
+            pass
 
     def handle_data(self, data):
-        if self._in_anchor and self._current_title is None:
+        if self._in_anchor and not self._current_title:
             text = data.strip()
             if text:
                 self._current_title = text
         elif self._in_li and not self._in_anchor:
             text = data.strip()
-            if len(text) == 10 and text[4] == "-" and text[7] == "-":
+            # 匹配 YYYY-MM-DD 格式
+            if re.match(r"^\d{4}-\d{2}-\d{2}$", text):
                 self._current_date = text
 
     def handle_endtag(self, tag):
@@ -83,21 +96,21 @@ class _ListParser(HTMLParser):
 
 
 class _ContentParser(HTMLParser):
-    """提取详情页正文：<div id="Zoom"> 内的 <p> 段落文本。"""
+    """提取详情页正文。"""
 
     def __init__(self):
         super().__init__()
         self._parts = []
         self._depth = 0
         self._capturing = False
+        self._in_article = False
 
     def handle_starttag(self, tag, attrs):
         attrs_dict = dict(attrs)
-        if not self._capturing:
-            if tag == "div" and attrs_dict.get("id") == "Zoom":
-                self._capturing = True
-                self._depth = 1
-                return
+        if tag == "div" and attrs_dict.get("class") == "TRS_Editor":
+            self._capturing = True
+            self._depth = 1
+            return
         if self._capturing:
             self._depth += 1
 
@@ -118,11 +131,27 @@ class _ContentParser(HTMLParser):
 
 
 def _extract_content(article_url, metrics):
+    """提取详情页正文内容。"""
     try:
         html = _fetch_with_retry(article_url, timeout=15)
         parser = _ContentParser()
         parser.feed(html)
-        return parser.get_text()
+
+        content = parser.get_text()
+        if not content:
+            # 尝试备用方案：提取所有段落文本
+            # 查找 div.main 或 div.article 内的文本
+            main_match = re.search(
+                r'<div\s+class="(?:main|article)"[^>]*>(.*?)</div>\s*</div>',
+                html,
+                re.DOTALL | re.IGNORECASE
+            )
+            if main_match:
+                # 移除HTML标签获取纯文本
+                text = re.sub(r'<[^>]+>', '', main_match.group(1))
+                text = re.sub(r'\s+', ' ', text).strip()
+                return text
+        return content
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
@@ -164,6 +193,9 @@ def scrape_data():
                         metrics.invalid_item_count += 1
                         continue
 
+                    # 相对链接需要正确拼接基准URL
+                    # href 格式: /doc/2025/12/12/4716664.shtml
+                    # 基准: https://tyjrswj.wuxi.gov.cn
                     article_url = urljoin(TARGET_URL, href)
 
                     # 去重

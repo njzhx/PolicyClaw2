@@ -155,7 +155,7 @@ def scrape_data():
             if page_index == 0:
                 page_url = TARGET_URL
             else:
-                page_url = f"{base_url}index_{page_index}.shtml"
+                page_url = f"{base_url}index_{page_index + 1}.shtml"
 
             html = _fetch_with_retry(page_url)
             nodes = _parse_list(html)
@@ -164,8 +164,7 @@ def scrape_data():
                 break
 
             page_raw_count = len(nodes)
-            if page_index == 0:
-                metrics.raw_item_count = page_raw_count
+            metrics.raw_item_count += page_raw_count
 
             oldest_date_on_page = None
 

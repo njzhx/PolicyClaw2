@@ -1,7 +1,8 @@
 """
-无锡市公安局_法规文件及解读爬虫
-目标栏目：https://ga.wuxi.gov.cn/jwgk/xxgkml/fgwjjjd/index.shtml
+无锡市卫生健康委员会_法规文件及解读爬虫
+目标网址: https://wjw.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml
 """
+import re
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
@@ -14,9 +15,8 @@ from crawler_core import (
 )
 from db_utils import save_to_policy
 
-
-TARGET_URL = "https://ga.wuxi.gov.cn/jwgk/xxgkml/fgwjjjd/index.shtml"
-SOURCE_NAME = "无锡市公安局_法规文件及解读"
+TARGET_URL = "https://wjw.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
+SOURCE_NAME = "无锡市卫生健康委员会_法规文件及解读"
 CATEGORY = "无锡"
 
 HEADERS = {
@@ -27,8 +27,6 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
-
-PAGE_SIZE = 20
 
 
 def _fetch_with_retry(url, max_retries=3, timeout=30):
@@ -43,45 +41,59 @@ def _fetch_with_retry(url, max_retries=3, timeout=30):
                 raise
 
 
+def _clean_text(content):
+    """清理正文中的 HTML 痕迹"""
+    # 移除 HTML 注释（包含内容标记）
+    content = re.sub(r'<!--.*?-->', '', content, flags=re.DOTALL)
+    # 移除脚本、样式
+    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL)
+    content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL)
+    # 转换标签为换行
+    content = re.sub(r'<[^>]+>', '\n', content)
+    # 清理多余换行
+    content = re.sub(r'\n{3,}', '\n\n', content)
+    return content.strip()
+
+
 def _extract_content(article_url, metrics):
     """抓取详情页正文内容"""
     try:
         html = _fetch_with_retry(article_url, timeout=15)
 
-        # 使用简单的 HTML 解析来提取正文
-        # 查找 div.detail 或正文容器
-        import re
+        # 优先尝试标准正文容器
+        zoom_match = re.search(
+            r'<div[^>]*id=["\']Zoom["\'][^>]*>(.*?)</div>',
+            html,
+            re.DOTALL | re.IGNORECASE
+        )
+        if zoom_match:
+            content = zoom_match.group(1)
+            content = _clean_text(content)
+            if content:
+                return content
 
-        # 尝试多个可能的正文容器
+        # 备选：<!--<$[CONTENT]>start--> 注释后的内容
+        content_start = html.find('<!--<$[CONTENT]>start-->')
+        if content_start != -1:
+            content_section = html[content_start + len('<!--<$[CONTENT]>start-->'):]
+            content_end = content_section.find('<!--<$[CONTENT]>end-->')
+            if content_end != -1:
+                content_section = content_section[:content_end]
+            content = _clean_text(content_section)
+            if content:
+                return content
+
+        # 备选：TRS_UEDITOR 或 detail class
         patterns = [
-            r'<div[^>]*class="[^"]*detail[^"]*"[^>]*>(.*?)</div>',
-            r'<div[^>]*id="[^"]*content[^"]*"[^>]*>(.*?)</div>',
-            r'<div[^>]*id="[^"]*Zoom[^"]*"[^>]*>(.*?)</div>',
-            r'<div[^>]*class="[^"]*TRS_UEDITOR[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class=["\'][^"\']*TRS_UEDITOR[^"\']*["\'][^>]*>(.*?)</div>',
+            r'<div[^>]*class=["\'][^"\']*detail[^"\']*["\'][^>]*>(.*?)</div>',
         ]
-
         for pattern in patterns:
             match = re.search(pattern, html, re.DOTALL | re.IGNORECASE)
             if match:
-                content_div = match.group(1)
-                # 移除脚本、样式和标签
-                content = re.sub(r'<script[^>]*>.*?</script>', '', content_div, flags=re.DOTALL)
-                content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL)
-                content = re.sub(r'<[^>]+>', '\n', content)
-                content = re.sub(r'\n{3,}', '\n\n', content)
-                content = content.strip()
+                content = _clean_text(match.group(1))
                 if content:
                     return content
-
-        # 如果没找到，尝试获取整个 body 的文本
-        body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
-        if body_match:
-            body = body_match.group(1)
-            body = re.sub(r'<script[^>]*>.*?</script>', '', body, flags=re.DOTALL)
-            body = re.sub(r'<style[^>]*>.*?</style>', '', body, flags=re.DOTALL)
-            body = re.sub(r'<[^>]+>', '\n', body)
-            body = re.sub(r'\n{3,}', '\n\n', body)
-            return body.strip()
 
         return ""
     except Exception as exc:
@@ -90,12 +102,12 @@ def _extract_content(article_url, metrics):
 
 
 def scrape_data():
-    """抓取无锡市公安局法规文件及解读列表"""
+    """抓取无锡市卫生健康委员会法规文件及解读列表"""
     policies = []
     latest_items = []
     metrics = CrawlerMetrics()
-
     target_from, target_to = get_crawl_date_window()
+    seen_urls = set()
 
     page_index = 0
     base_url = TARGET_URL.rsplit("/", 1)[0] + "/"
@@ -110,8 +122,11 @@ def scrape_data():
             html = _fetch_with_retry(page_url)
 
             # 解析列表：<ul id="doclist">...</ul>
-            import re
-            list_match = re.search(r'<ul[^>]*id="doclist"[^>]*>(.*?)</ul>', html, re.DOTALL | re.IGNORECASE)
+            list_match = re.search(
+                r'<ul[^>]*id=["\']doclist["\'][^>]*>(.*?)</ul>',
+                html,
+                re.DOTALL | re.IGNORECASE
+            )
 
             if not list_match:
                 break
@@ -127,12 +142,16 @@ def scrape_data():
 
             page_raw_count = len(li_matches)
             metrics.raw_item_count += page_raw_count
+
             oldest_date_on_page = None
 
             for li_html in li_matches:
                 try:
                     # 提取链接和标题
-                    link_match = re.search(r'<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', li_html)
+                    link_match = re.search(
+                        r'<a[^>]*href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>',
+                        li_html
+                    )
                     # 提取日期
                     date_match = re.search(r'<span[^>]*>(\d{4}-\d{2}-\d{2})</span>', li_html)
 
@@ -156,10 +175,16 @@ def scrape_data():
                         continue
 
                     article_url = urljoin(TARGET_URL, href)
+
+                    # 去重
+                    if article_url in seen_urls:
+                        metrics.duplicate_policy_count += 1
+                        continue
+                    seen_urls.add(article_url)
+
                     metrics.valid_item_count += 1
                     latest_items.append({"title": title, "pub_at": pub_at})
 
-                    # 记录页面最旧日期用于分页判断
                     if oldest_date_on_page is None or pub_at < oldest_date_on_page:
                         oldest_date_on_page = pub_at
 
@@ -184,22 +209,12 @@ def scrape_data():
                     metrics.invalid_item_count += 1
                     metrics.errors.append(f"列表记录解析失败: {exc}")
 
-            # 分页停止条件：最旧日期早于目标窗口起始
+            # 分页提前终止：当前页最旧日期已早于目标窗口起始日期
             if oldest_date_on_page and oldest_date_on_page < target_from:
                 break
-            # 如果当前页数量少于每页数量，说明是最后一页
-            if page_raw_count < PAGE_SIZE:
+            # 不足整页时终止（假设每页约20条）
+            if page_raw_count < 15:
                 break
-
-            # 检查是否有更多页面
-            # 格式：pageIndex, pageCount, pageSize
-            page_info_match = re.search(r'pageIndex\s*:\s*"(\d+)"\s*,\s*pageCount\s*:\s*"(\d+)"', html)
-            if page_info_match:
-                current_page = int(page_info_match.group(1))
-                total_pages = int(page_info_match.group(2))
-                if current_page >= total_pages:
-                    break
-
             page_index += 1
 
     except Exception as exc:
