@@ -1445,6 +1445,16 @@ if __name__ == "__main__":
         print(f"[WARN]  导入无锡市人力资源和社会保障局_法规文件及解读爬虫失败: {e}")
 
     try:
+        from City import wuxi_fao_fgwjjjd_crawler
+        manager.register_crawler(
+            "无锡市外事办公室_法规文件及解读",
+            wuxi_fao_fgwjjjd_crawler.run,
+            wuxi_fao_fgwjjjd_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入无锡市外事办公室_法规文件及解读爬虫失败: {e}")
+
+    try:
         manager.validate_crawler_selection()
     except ValueError as exc:
         print(f"[ERROR] 指定爬虫参数无效: {exc}")
