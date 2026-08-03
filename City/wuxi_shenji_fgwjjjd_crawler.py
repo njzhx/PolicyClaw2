@@ -1,16 +1,14 @@
 """
-无锡市数据局_法规政策与文件爬虫
-目标栏目：https://bigdata.wuxi.gov.cn/zfxxgk/fdzdgknr/fgwjjjd/index.shtml
+无锡市审计局_法规文件及解读爬虫
+目标栏目：https://sjj.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml
 
 发布日期来源：
-  - 优先从列表页中 <a> 标签后的第一个日期文本提取
-  - 如果列表页无明确日期节点，则从详情页提取
+  - 从列表页链接后的日期文本提取
   - 日期格式：严格匹配 YYYY-MM-DD
   - 日期缺失时跳过该记录，不使用默认日期
 """
 import re
 from datetime import datetime
-from html.parser import HTMLParser
 from urllib.parse import urljoin
 
 import requests
@@ -26,8 +24,8 @@ from crawler_core import (
 from db_utils import save_to_policy
 
 
-TARGET_URL = "https://bigdata.wuxi.gov.cn/zfxxgk/fdzdgknr/fgwjjjd/index.shtml"
-SOURCE_NAME = "无锡市数据局_法规政策与文件"
+TARGET_URL = "https://sjj.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
+SOURCE_NAME = "无锡市审计局_法规文件及解读"
 CATEGORY = "无锡"
 
 HEADERS = {
@@ -39,7 +37,7 @@ HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
 
-ALLOWED_HOST = "bigdata.wuxi.gov.cn"
+ALLOWED_HOST = "sjj.wuxi.gov.cn"
 
 
 def _fetch_with_retry(url, max_retries=3, timeout=30):
@@ -56,6 +54,25 @@ def _fetch_with_retry(url, max_retries=3, timeout=30):
             print(f"[RETRY] 第 {attempt} 次请求失败: {url} - {exc}")
 
 
+def _extract_pub_date_from_list(text):
+    """
+    从列表文本中提取发布日期
+    返回: raw_date_str 或 None
+    """
+    if not text:
+        return None
+    # 匹配 YYYY-MM-DD 格式
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+    if match:
+        raw_date = match.group(1)
+        try:
+            datetime.strptime(raw_date, "%Y-%m-%d")
+            return raw_date
+        except ValueError:
+            return None
+    return None
+
+
 def _extract_pub_date_from_detail(session, article_url, metrics):
     """
     从详情页提取发布日期
@@ -69,17 +86,15 @@ def _extract_pub_date_from_detail(session, article_url, metrics):
 
         # 尝试多种详情页日期选择器
         date_selectors = [
-            # 标准格式：发布时间字段
-            (".info-content .time", "info-content time"),
-            (".article-info .time", "article-info time"),
-            (".publish-time", "publish-time"),
-            (".pub-time", "pub-time"),
-            ("[class*='publish']", "publish class"),
-            ("[class*='pubDate']", "pubDate class"),
-            ("[class*='date']", "date class"),
+            ".publish-time",
+            ".pub-time",
+            ".time",
+            "[class*='publish']",
+            "[class*='pubDate']",
+            "[class*='date']",
         ]
 
-        for selector, desc in date_selectors:
+        for selector in date_selectors:
             elem = soup.select_one(selector)
             if elem:
                 text = elem.get_text(strip=True)
@@ -87,7 +102,6 @@ def _extract_pub_date_from_detail(session, article_url, metrics):
                 date_match = re.search(r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日]?)", text)
                 if date_match:
                     raw_date = date_match.group(1)
-                    # 标准化
                     normalized = raw_date.replace("年", "-").replace("月", "-").replace("日", "")
                     try:
                         parsed = datetime.strptime(normalized[:10], "%Y-%m-%d").date()
@@ -125,10 +139,10 @@ def _extract_content(session, article_url, metrics):
 
         # 尝试多个正文选择器
         content_elem = (
-            soup.select_one("#zoom")
+            soup.select_one(".content")
+            or soup.select_one("#Zoom")
             or soup.select_one("#UCAP-CONTENT")
             or soup.select_one(".TRS_UEDITOR")
-            or soup.select_one(".content")
             or soup.select_one(".article-content")
             or soup.select_one(".main_content")
         )
@@ -144,75 +158,76 @@ def _extract_content(session, article_url, metrics):
         return ""
 
 
-class ListItemParser(HTMLParser):
+def _parse_list_page(html):
     """
-    解析列表页中的每个 li 元素
-    提取：标题、链接、发布日期（仅从链接后的第一个明确日期）
+    解析列表页，提取标题、链接和日期
+    返回: [{"title": str, "href": str, "raw_date": str}, ...]
     """
+    soup = BeautifulSoup(html, "html.parser")
+    records = []
 
-    def __init__(self):
-        super().__init__()
-        self.records = []
-        self._in_li = False
-        self._in_anchor = False
-        self._after_anchor = False
-        self._current_href = None
-        self._current_title = None
-        self._after_anchor_text = ""
+    # 查找所有列表项（通常在 ul/ol 列表或特定容器中）
+    # 模式1: ul > li > a + 日期文本
+    list_containers = soup.select("ul, ol")
+    for container in list_containers:
+        items = container.select("li")
+        for item in items:
+            links = item.select("a")
+            for link in links:
+                title = link.get_text(strip=True)
+                href = link.get("href", "").strip()
+                if not title or not href:
+                    continue
+                # 跳过外链
+                if "://" in href and ALLOWED_HOST not in href:
+                    continue
+                # 获取链接后的文本（可能是日期）
+                after_link_text = ""
+                for sibling in link.find_all_next(string=True):
+                    if sibling.parent and sibling.parent in item.children if hasattr(sibling.parent, 'children') else True:
+                        after_link_text += str(sibling)
+                        if len(after_link_text) > 20:
+                            break
+                raw_date = _extract_pub_date_from_list(after_link_text)
+                if raw_date:
+                    records.append({
+                        "title": title,
+                        "href": href,
+                        "raw_date": raw_date,
+                    })
+                    break  # 每个li只取第一个有效链接
 
-    def handle_starttag(self, tag, attrs):
-        attrs_dict = dict(attrs)
-        if tag == "li":
-            self._in_li = True
-            self._current_href = None
-            self._current_title = None
-            self._after_anchor = False
-            self._after_anchor_text = ""
-        elif self._in_li and tag == "a":
-            self._in_anchor = True
-            self._current_href = attrs_dict.get("href", "").strip()
+    # 模式2: 直接查找带有日期的链接模式
+    if not records:
+        for link in soup.find_all("a"):
+            title = link.get_text(strip=True)
+            href = link.get("href", "").strip()
+            if not title or len(title) < 5:
+                continue
+            if "://" in href and ALLOWED_HOST not in href:
+                continue
+            # 获取链接后的兄弟文本
+            after_text = ""
+            for sibling in link.find_all_next(string=True):
+                parent = sibling.parent
+                if parent and hasattr(parent, 'children'):
+                    if any(sibling in list(parent.children) for sibling in link.find_all_next()):
+                        after_text += str(sibling)
+                        if len(after_text) > 20:
+                            break
+            raw_date = _extract_pub_date_from_list(after_text)
+            if raw_date:
+                records.append({
+                    "title": title,
+                    "href": href,
+                    "raw_date": raw_date,
+                })
 
-    def handle_data(self, data):
-        if self._in_anchor and self._current_title is None:
-            # 只取链接内的第一个文本
-            text = data.strip()
-            if text:
-                self._current_title = text
-        elif self._in_li and not self._in_anchor:
-            # 链接后的文本（可能是日期）
-            if self._after_anchor or self._current_title is not None:
-                self._after_anchor = True
-                self._after_anchor_text += data
-
-    def handle_endtag(self, tag):
-        if tag == "a" and self._in_anchor:
-            self._in_anchor = False
-            self._after_anchor = True
-        elif tag == "li" and self._in_li:
-            self._in_li = False
-            self._after_anchor = False
-
-            if self._current_title and self._current_href:
-                # 从链接后的文本中提取第一个 YYYY-MM-DD 格式的日期
-                raw_date = None
-                date_match = re.search(r"(\d{4}-\d{2}-\d{2})", self._after_anchor_text)
-                if date_match:
-                    raw_date = date_match.group(1)
-                    # 严格验证日期格式
-                    try:
-                        datetime.strptime(raw_date, "%Y-%m-%d")
-                        self.records.append({
-                            "title": self._current_title,
-                            "href": self._current_href,
-                            "raw_date": raw_date,
-                        })
-                    except ValueError:
-                        # 日期格式无效，不记录
-                        pass
+    return records
 
 
 def scrape_data():
-    """抓取无锡市数据局法规政策与文件列表"""
+    """抓取无锡市审计局法规文件及解读列表"""
     policies = []
     latest_items = []
     metrics = CrawlerMetrics()
@@ -237,10 +252,7 @@ def scrape_data():
                 metrics.errors.append(f"列表页抓取失败: {page_url} - {exc}")
                 break
 
-            # 使用 HTMLParser 解析列表
-            parser = ListItemParser()
-            parser.feed(html)
-            records = parser.records
+            records = _parse_list_page(html)
 
             if not records:
                 break
@@ -258,12 +270,9 @@ def scrape_data():
 
                     if not title or not href or not raw_date:
                         metrics.invalid_item_count += 1
-                        metrics.errors.append(f"字段缺失: title={bool(title)}, href={bool(href)}, raw_date={bool(raw_date)}")
-                        continue
-
-                    # 过滤外链
-                    if "://" in href and ALLOWED_HOST not in href:
-                        metrics.invalid_item_count += 1
+                        metrics.errors.append(
+                            f"字段缺失: title={bool(title)}, href={bool(href)}, raw_date={bool(raw_date)}"
+                        )
                         continue
 
                     article_url = urljoin(TARGET_URL, href)
@@ -309,7 +318,7 @@ def scrape_data():
             if oldest_date_on_page and oldest_date_on_page < target_from:
                 break
             # 不足整页时终止
-            if page_raw_count < 20:
+            if page_raw_count < 15:
                 break
             page_index += 1
 

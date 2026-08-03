@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+无锡市城市管理局 - 法规文件及解读
+目标网址: https://cg.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml
+"""
 import re
 from html.parser import HTMLParser
 from urllib.parse import urljoin
@@ -12,8 +17,8 @@ from crawler_core import (
 )
 from db_utils import save_to_policy
 
-TARGET_URL = "https://dpc.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
-SOURCE_NAME = "无锡市发展和改革委员会_法规文件及解读"
+TARGET_URL = "https://cg.wuxi.gov.cn/zfxxgk/xxgkml/fgwjjjd/index.shtml"
+SOURCE_NAME = "无锡市城市管理局_法规文件及解读"
 CATEGORY = "无锡"
 
 HEADERS = {
@@ -24,6 +29,9 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
+
+# 允许的域名，防止抓取外部链接
+ALLOWED_HOST = "cg.wuxi.gov.cn"
 
 
 def _fetch_with_retry(url, max_retries=3, timeout=30):
@@ -39,7 +47,16 @@ def _fetch_with_retry(url, max_retries=3, timeout=30):
 
 
 class _ListParser(HTMLParser):
-    """解析列表页，提取 (title, href, pub_at) 三元组。"""
+    """解析列表页，提取 (title, href, raw_date) 三元组。
+
+    列表结构:
+    <ul id="doclist" class="pd20">
+        <li>
+            <a target="_blank" title="标题" href="/doc/2026/03/20/4750176.shtml">标题</a>
+            <span>2026-03-20</span>
+        </li>
+    </ul>
+    """
 
     def __init__(self):
         super().__init__()
@@ -67,6 +84,7 @@ class _ListParser(HTMLParser):
             if text:
                 self._current_title = text
         elif self._in_li and not self._in_anchor:
+            # 日期在 <span> 标签内，如 <span>2026-03-20</span>
             text = data.strip()
             if len(text) == 10 and text[4] == "-" and text[7] == "-":
                 self._current_date = text
@@ -83,7 +101,7 @@ class _ListParser(HTMLParser):
 
 
 class _ContentParser(HTMLParser):
-    """提取详情页正文：<div id="Zoom"> 内的 <p> 段落文本。"""
+    """提取详情页正文：<div id="Zoom"> 内的段落文本。"""
 
     def __init__(self):
         super().__init__()
@@ -118,6 +136,7 @@ class _ContentParser(HTMLParser):
 
 
 def _extract_content(article_url, metrics):
+    """抓取并解析详情页正文。"""
     try:
         html = _fetch_with_retry(article_url, timeout=15)
         parser = _ContentParser()
@@ -162,6 +181,14 @@ def scrape_data():
                     pub_at = parse_date(raw_date)
                     if not title or not href or not pub_at:
                         metrics.invalid_item_count += 1
+                        metrics.errors.append(
+                            f"无法解析日期或标题为空: {title[:30] if title else '无标题'}"
+                        )
+                        continue
+
+                    # 只处理同域名链接
+                    if ALLOWED_HOST not in href and not href.startswith("/"):
+                        metrics.invalid_item_count += 1
                         continue
 
                     article_url = urljoin(TARGET_URL, href)
@@ -199,7 +226,7 @@ def scrape_data():
             # 分页提前终止：当前页最旧日期已早于目标窗口起始日期
             if oldest_date_on_page and oldest_date_on_page < target_from:
                 break
-            # 不足整页时终止
+            # 不足整页时终止（每页20条）
             if page_raw_count < 20:
                 break
             page_index += 1
