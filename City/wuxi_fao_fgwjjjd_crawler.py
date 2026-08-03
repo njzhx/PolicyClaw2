@@ -54,7 +54,7 @@ def _extract_detail_date(session, article_url, metrics):
     """
     从详情页提取发布日期
     返回: (raw_date, parsed_date) 或 (None, None)
-    
+
     日期规则：列表页与详情页日期必须一致，否则跳过并报告
     """
     try:
