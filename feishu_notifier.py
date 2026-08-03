@@ -208,61 +208,56 @@ class FeishuNotifier:
         # 分隔线
         content.append([{"tag": "text", "text": "==================="}])
 
-        # 添加API推送结果
-        api_success_count = 0
-        api_error_count = 0
-        api_results_added = False
+        # 按 Supabase 中 policy_key 写入前后的状态展示真实新增/更新数。
+        total_inserted = 0
+        total_updated = 0
+        storage_results_added = False
+        verified_results_added = False
 
         for name, result in results.items():
-            if result.get('status') == 'success' and 'api_push_result' in result:
-                api_result = result.get('api_push_result')
-                # 确保 api_result 是字典类型，某些爬虫可能返回特殊格式
-                if api_result and isinstance(api_result, dict):
-                    api_results_added = True
-                    status = api_result.get('status', 'unknown')
-                    message = api_result.get('message', '')
-                    target_url = result.get('target_url', '')
+            storage_result = result.get('storage_result')
+            if storage_result and isinstance(storage_result, dict):
+                storage_results_added = True
+                status = storage_result.get('status', 'unknown')
+                inserted_count = storage_result.get('inserted_count', 0)
+                updated_count = storage_result.get('updated_count', 0)
+                counts_verified = storage_result.get('counts_verified') is True
+                target_url = result.get('target_url', '')
 
-                    if status == 'success':
-                        if target_url:
-                            content.append([
-                                {"tag": "text", "text": "✅ "},
-                                {"tag": "a", "text": name, "href": target_url},
-                                {"tag": "text", "text": f"：{message}"}
-                            ])
-                        else:
-                            content.append([
-                                {"tag": "text", "text": f"✅ {name}：{message}"}
-                            ])
-                        api_success_count += 1
-                    elif status == 'error':
-                        if target_url:
-                            content.append([
-                                {"tag": "text", "text": "❌ "},
-                                {"tag": "a", "text": name, "href": target_url},
-                                {"tag": "text", "text": f"：{message}"}
-                            ])
-                        else:
-                            content.append([
-                                {"tag": "text", "text": f"❌ {name}：{message}"}
-                            ])
-                        api_error_count += 1
-                    else:
-                        if target_url:
-                            content.append([
-                                {"tag": "text", "text": "⚠️ "},
-                                {"tag": "a", "text": name, "href": target_url},
-                                {"tag": "text", "text": f"：{message}"}
-                            ])
-                        else:
-                            content.append([
-                                {"tag": "text", "text": f"⚠️ {name}：{message}"}
-                            ])
+                if status in {'success', 'partial'} and counts_verified:
+                    verified_results_added = True
+                    total_inserted += inserted_count
+                    total_updated += updated_count
+                    icon = "✅" if status == 'success' else "⚠️"
+                    detail = f"新增 {inserted_count} 条，更新 {updated_count} 条"
+                    failed_count = storage_result.get('failed_count', 0)
+                    if failed_count:
+                        detail += f"，失败或无法核验 {failed_count} 条"
+                elif status in {'success', 'partial'}:
+                    icon = "⚠️"
+                    detail = "未获得按 policy_key 核验的新增/更新统计"
+                else:
+                    icon = "❌" if status == 'error' else "⚠️"
+                    detail = storage_result.get(
+                        'message', '未获得 Supabase 新增/更新统计'
+                    )
+                row = [{"tag": "text", "text": f"{icon} "}]
+                if target_url:
+                    row.append({"tag": "a", "text": name, "href": target_url})
+                else:
+                    row.append({"tag": "text", "text": name})
+                row.append({"tag": "text", "text": f"：{detail}"})
+                content.append(row)
 
-        if api_results_added:
+        if verified_results_added:
             content.append([
-                {"tag": "text", "text": f"📊 API推送统计: 成功 {api_success_count} 个, 失败 {api_error_count} 个"}
+                {"tag": "text", "text": f"📊 Supabase汇总：新增 {total_inserted} 条，更新 {total_updated} 条"}
             ])
+        elif storage_results_added:
+            content.append([{
+                "tag": "text",
+                "text": "📊 Supabase汇总：没有可核验的新增/更新统计",
+            }])
 
         # 发送富文本消息（标题需包含飞书机器人关键词"政策"）
         return self.send_rich_text("政策爬虫执行结果", content)

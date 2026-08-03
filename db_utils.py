@@ -31,6 +31,14 @@ POLICY_TABLE_FIELDS = (
 UPSERT_BATCH_SIZE = 100
 
 
+class PolicySaveItems(list):
+    """保留现有列表接口，同时携带结构化 Supabase 写入统计。"""
+
+    def __init__(self, items=(), storage_result=None):
+        super().__init__(items)
+        self.storage_result = storage_result
+
+
 class DBUtils:
     def __init__(self):
         """初始化数据库工具"""
@@ -100,6 +108,23 @@ class DBUtils:
         for index in range(0, len(items), batch_size):
             yield items[index:index + batch_size]
 
+    def get_existing_policy_keys(self, supabase, policy_keys):
+        """返回 Supabase 当前已存在的 policy_key 集合。"""
+        keys = [key for key in policy_keys if key]
+        if not keys:
+            return set()
+        response = (
+            supabase.table(self.policy_table)
+            .select("policy_key")
+            .in_("policy_key", keys)
+            .execute()
+        )
+        return {
+            row.get("policy_key")
+            for row in (response.data or [])
+            if row.get("policy_key")
+        }
+
     def save_to_policy(self, data_list, source_name):
         """保存数据到 policyclaw2 表
 
@@ -112,15 +137,40 @@ class DBUtils:
         """
         if not data_list:
             print(f"⚠️  {source_name}：没有数据需要写入，跳过。")
-            return [], None
+            storage_result = {
+                "status": "skipped",
+                "saved_count": 0,
+                "inserted_count": 0,
+                "updated_count": 0,
+                "failed_count": 0,
+                "counts_verified": False,
+                "message": "没有数据需要写入",
+            }
+            return PolicySaveItems([], storage_result), None
 
         try:
             processed_data = self.process_data(data_list, source_name)
             if not processed_data:
                 print(f"⚠️  {source_name}：数据校验后没有可写入数据，跳过。")
-                return [], {"status": "skipped", "message": "数据校验后没有可写入数据"}
+                storage_result = {
+                    "status": "skipped",
+                    "saved_count": 0,
+                    "inserted_count": 0,
+                    "updated_count": 0,
+                    "failed_count": 0,
+                    "counts_verified": False,
+                    "message": "数据校验后没有可写入数据",
+                }
+                return PolicySaveItems([], storage_result), {
+                    "status": "skipped",
+                    "message": "数据校验后没有可写入数据",
+                }
 
             saved_items = []
+            inserted_count = 0
+            updated_count = 0
+            failed_count = 0
+            storage_errors = []
             if self.allow_supabase_write:
                 try:
                     # policy_key 需要数据库唯一约束；见 supabase_policy_key_unique.sql。
@@ -131,14 +181,36 @@ class DBUtils:
                                 self.to_database_item(item)
                                 for item in batch_items
                             ]
+                            batch_keys = [item["policy_key"] for item in batch]
+                            keys_before = self.get_existing_policy_keys(
+                                supabase, batch_keys
+                            )
                             (
                                 supabase.table(self.policy_table)
                                 .upsert(batch, on_conflict="policy_key")
                                 .execute()
                             )
-                            saved_items.extend(batch_items)
+                            keys_after = self.get_existing_policy_keys(
+                                supabase, batch_keys
+                            )
+                            persisted_keys = set(batch_keys) & keys_after
+                            missing_keys = set(batch_keys) - persisted_keys
+                            inserted_count += len(persisted_keys - keys_before)
+                            updated_count += len(persisted_keys & keys_before)
+                            failed_count += len(missing_keys)
+                            if missing_keys:
+                                storage_errors.append(
+                                    f"UPSERT 后有 {len(missing_keys)} 个 policy_key 无法核验"
+                                )
+                            saved_items.extend(
+                                item
+                                for item in batch_items
+                                if item.get("policy_key") in persisted_keys
+                            )
 
                         except Exception as batch_e:
+                            failed_count += len(batch_items)
+                            storage_errors.append(str(batch_e))
                             print(
                                 f"⚠️  {source_name}：批量 UPSERT 失败，"
                                 f"请确认 {self.policy_table}.policy_key 已创建唯一约束 - {batch_e}"
@@ -147,6 +219,8 @@ class DBUtils:
 
                     print(f"✅ {source_name}：成功写入 {len(saved_items)} 条数据到 Supabase")
                 except Exception as database_e:
+                    failed_count = len(processed_data)
+                    storage_errors.append(str(database_e))
                     print(f"❌ {source_name}：数据库写入失败 - {database_e}")
             else:
                 print(
@@ -154,6 +228,40 @@ class DBUtils:
                     f"跳过写入 {len(processed_data)} 条数据。"
                     "设置 POLICYCLAW_ENABLE_SUPABASE_WRITE=1 后才会写入。"
                 )
+
+            if self.allow_supabase_write:
+                if failed_count and saved_items:
+                    storage_status = "partial"
+                elif failed_count:
+                    storage_status = "error"
+                else:
+                    storage_status = "success"
+                storage_message = (
+                    f"Supabase 写入完成：新增 {inserted_count} 条，"
+                    f"更新 {updated_count} 条"
+                )
+                if failed_count:
+                    storage_message += f"，失败或无法核验 {failed_count} 条"
+                storage_result = {
+                    "status": storage_status,
+                    "saved_count": len(saved_items),
+                    "inserted_count": inserted_count,
+                    "updated_count": updated_count,
+                    "failed_count": failed_count,
+                    "counts_verified": True,
+                    "message": storage_message,
+                    "errors": storage_errors[:3],
+                }
+            else:
+                storage_result = {
+                    "status": "skipped",
+                    "saved_count": 0,
+                    "inserted_count": 0,
+                    "updated_count": 0,
+                    "failed_count": 0,
+                    "counts_verified": False,
+                    "message": "Supabase 写入开关未开启，未统计新增/更新",
+                }
 
             # API 与 Supabase 独立：即使不写数据库，也可推送本次标准化后的数据。
             api_push_result = None
@@ -169,12 +277,20 @@ class DBUtils:
                     "设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。"
                 )
 
-            # 返回抓取并标准化后的数据；数据库成功数由 Supabase 日志单独统计。
-            return processed_data, api_push_result
+            return PolicySaveItems(processed_data, storage_result), api_push_result
 
         except Exception as e:
             print(f"❌ {source_name}：数据处理失败 - {e}")
-            return [], None
+            storage_result = {
+                "status": "error",
+                "saved_count": 0,
+                "inserted_count": 0,
+                "updated_count": 0,
+                "failed_count": len(data_list),
+                "counts_verified": False,
+                "message": f"数据处理失败 - {e}",
+            }
+            return PolicySaveItems([], storage_result), None
 
     def push_to_api(self, data_list, source_name):
         """将数据推送到目标API接口
