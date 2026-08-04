@@ -1095,6 +1095,16 @@ if __name__ == "__main__":
         )
     except ImportError as e:
         print(f"[WARN]  导入南京市科学技术局部门文件爬虫失败: {e}")
+    # 导入南京市人民政府国有资产监督管理委员会部门文件爬虫
+    try:
+        from City import nanjing_gzw_bmwj_crawler
+        manager.register_crawler(
+            "南京市人民政府国有资产监督管理委员会_部门文件",
+            nanjing_gzw_bmwj_crawler.run,
+            nanjing_gzw_bmwj_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入南京市人民政府国有资产监督管理委员会部门文件爬虫失败: {e}")
 
     # 导入交通运输部政府信息公开爬虫
     try:
