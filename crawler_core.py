@@ -442,6 +442,15 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
         items = result or []
         metrics = extract_metrics_from_output(output, len(items))
 
+    if storage_result is None:
+        storage_result = getattr(items, "storage_result", None)
+    if storage_result is None and data_list is not None:
+        storage_result = getattr(data_list, "storage_result", None)
+    if storage_result is None and isinstance(result, CrawlerRunResult):
+        storage_result = getattr(result.items, "storage_result", None)
+    if storage_result is None and isinstance(result, dict):
+        storage_result = getattr(result.get("items"), "storage_result", None)
+
     if (
         output
         and metrics.raw_item_count == 0
