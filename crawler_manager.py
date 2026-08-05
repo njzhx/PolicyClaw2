@@ -1753,6 +1753,15 @@ if __name__ == "__main__":
         print(f"[WARN] 导入南京市机关事务管理局部门文件爬虫失败: {exc}")
 
     try:
+        from City import wuxi_gzw_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_gzw_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_gzw_fgwjjjd_crawler.run,
+            wuxi_gzw_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_gzw_fgwjjjd_crawler 爬虫失败: {exc}")
+    try:
         manager.validate_crawler_selection()
     except ValueError as exc:
         print(f"[ERROR] 指定爬虫参数无效: {exc}")
