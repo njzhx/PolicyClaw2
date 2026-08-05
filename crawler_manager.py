@@ -1729,6 +1729,18 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_yjglj_fgwjjjd_crawler 爬虫失败: {exc}")
+
+    # 导入南京市信访局部门文件爬虫
+    try:
+        from City import nanjing_xfj_bmwj_crawler
+        manager.register_crawler(
+            "南京市信访局_部门文件",
+            nanjing_xfj_bmwj_crawler.run,
+            nanjing_xfj_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入南京市信访局部门文件爬虫失败: {exc}")
+
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:
