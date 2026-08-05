@@ -138,9 +138,90 @@ jobs:
       - name: 创建results目录
         run: mkdir -p results
 
-      - name: 执行爬虫并保存输出
+      - name: 执行爬虫并监控资源
+        shell: bash
         run: |
-          python crawler_manager.py 2>&1 | tee results/crawler_output_$(date +%Y%m%d_%H%M%S).md
+          set +e
+
+          timestamp=$(date +%Y%m%d_%H%M%S)
+          output_file="results/crawler_output_${timestamp}.md"
+          resource_file="results/resource_usage_${timestamp}.csv"
+          process_file="results/resource_processes_${timestamp}.log"
+
+          cpu_count=$(nproc)
+          memory_total_mb=$(awk '/^MemTotal:/ {printf "%.0f", $2 / 1024}' /proc/meminfo)
+          disk_total_mb=$(df -Pm / | awk 'NR == 2 {print $2}')
+
+          echo "Runner resources: CPU=${cpu_count}, memory=${memory_total_mb} MB, disk=${disk_total_mb} MB"
+          echo "timestamp,cpu_used_pct,memory_used_mb,memory_available_mb,disk_used_mb,load_1m,load_5m,load_15m" \
+            > "$resource_file"
+
+          python crawler_manager.py > >(tee "$output_file") 2>&1 &
+          crawler_pid=$!
+
+          read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+          previous_idle=$((idle + iowait))
+          previous_total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+
+          while kill -0 "$crawler_pid" 2>/dev/null; do
+            sleep 5
+
+            read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
+            current_idle=$((idle + iowait))
+            current_total=$((user + nice + system + idle + iowait + irq + softirq + steal))
+            total_delta=$((current_total - previous_total))
+            idle_delta=$((current_idle - previous_idle))
+
+            if [ "$total_delta" -gt 0 ]; then
+              cpu_used=$(awk -v total="$total_delta" -v idle="$idle_delta" \
+                'BEGIN {printf "%.1f", 100 * (total - idle) / total}')
+            else
+              cpu_used="0.0"
+            fi
+
+            memory_total_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+            memory_available_kb=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+            memory_used_mb=$(( (memory_total_kb - memory_available_kb) / 1024 ))
+            memory_available_mb=$(( memory_available_kb / 1024 ))
+            disk_used_mb=$(df -Pm / | awk 'NR == 2 {print $3}')
+            read -r load_1m load_5m load_15m _ < /proc/loadavg
+            now=$(date --iso-8601=seconds)
+
+            echo "$now,$cpu_used,$memory_used_mb,$memory_available_mb,$disk_used_mb,$load_1m,$load_5m,$load_15m" \
+              >> "$resource_file"
+
+            {
+              echo "===== $now ====="
+              ps -eo pid,ppid,%cpu,%mem,rss,comm,args --sort=-rss | head -15
+            } >> "$process_file"
+
+            previous_idle=$current_idle
+            previous_total=$current_total
+          done
+
+          wait "$crawler_pid"
+          crawler_status=$?
+
+          peak_cpu=$(awk -F, 'NR > 1 && $2 + 0 > max {max=$2} END {printf "%.1f", max+0}' "$resource_file")
+          peak_memory_mb=$(awk -F, 'NR > 1 && $3 + 0 > max {max=$3} END {printf "%.0f", max+0}' "$resource_file")
+          minimum_available_mb=$(awk -F, 'NR == 2 {min=$4} NR > 1 && $4 + 0 < min {min=$4} END {printf "%.0f", min+0}' "$resource_file")
+          peak_disk_mb=$(awk -F, 'NR > 1 && $5 + 0 > max {max=$5} END {printf "%.0f", max+0}' "$resource_file")
+
+          {
+            echo "## 爬虫资源占用"
+            echo ""
+            echo "| 指标 | 数值 |"
+            echo "| --- | ---: |"
+            echo "| Runner CPU | ${cpu_count} 核 |"
+            echo "| Runner 总内存 | ${memory_total_mb} MB |"
+            echo "| CPU 峰值 | ${peak_cpu}% |"
+            echo "| 内存使用峰值 | ${peak_memory_mb} MB |"
+            echo "| 最低可用内存 | ${minimum_available_mb} MB |"
+            echo "| 根分区使用峰值 | ${peak_disk_mb} MB |"
+            echo "| 采样间隔 | 5 秒 |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$crawler_status"
         env:
           CRAWL_MODE: ${{ inputs.crawl_mode }}
           CRAWL_DATE: ${{ inputs.crawl_date }}
