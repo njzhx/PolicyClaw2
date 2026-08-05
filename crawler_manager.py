@@ -1740,6 +1740,61 @@ if __name__ == "__main__":
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_yjglj_fgwjjjd_crawler 爬虫失败: {exc}")
 
+    try:
+        from City import nanjing_amr_bmwj_crawler
+        manager.register_crawler(
+            nanjing_amr_bmwj_crawler.SOURCE_NAME,
+            nanjing_amr_bmwj_crawler.run,
+            nanjing_amr_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 nanjing_amr_bmwj_crawler 爬虫失败: {exc}")
+    try:
+        from City import nanjing_tyj_bmwj_crawler
+        manager.register_crawler(
+            nanjing_tyj_bmwj_crawler.SOURCE_NAME,
+            nanjing_tyj_bmwj_crawler.run,
+            nanjing_tyj_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 nanjing_tyj_bmwj_crawler 爬虫失败: {exc}")
+    try:
+        from City import nanjing_tjj_bmwj_crawler
+        manager.register_crawler(
+            nanjing_tjj_bmwj_crawler.SOURCE_NAME,
+            nanjing_tjj_bmwj_crawler.run,
+            nanjing_tjj_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 nanjing_tjj_bmwj_crawler 爬虫失败: {exc}")
+    try:
+        from City import nanjing_ybj_bmwj_crawler
+        manager.register_crawler(
+            nanjing_ybj_bmwj_crawler.SOURCE_NAME,
+            nanjing_ybj_bmwj_crawler.run,
+            nanjing_ybj_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 nanjing_ybj_bmwj_crawler 爬虫失败: {exc}")
+    try:
+        from City import nanjing_xfj_bmwj_crawler
+        manager.register_crawler(
+            nanjing_xfj_bmwj_crawler.SOURCE_NAME,
+            nanjing_xfj_bmwj_crawler.run,
+            nanjing_xfj_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 nanjing_xfj_bmwj_crawler 爬虫失败: {exc}")
+    try:
+        from City import nanjing_mzzjj_bmwj_crawler
+        manager.register_crawler(
+            nanjing_mzzjj_bmwj_crawler.SOURCE_NAME,
+            nanjing_mzzjj_bmwj_crawler.run,
+            nanjing_mzzjj_bmwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 nanjing_mzzjj_bmwj_crawler 爬虫失败: {exc}")
+
     # 导入南京市国防动员办公室部门文件爬虫
     try:
         from City import nanjing_gdb_bmwj_crawler
