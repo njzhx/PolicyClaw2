@@ -1739,6 +1739,15 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_yjglj_fgwjjjd_crawler 爬虫失败: {exc}")
+    try:
+        from City import wuxi_ylbzj_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_ylbzj_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_ylbzj_fgwjjjd_crawler.run,
+            wuxi_ylbzj_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_ylbzj_fgwjjjd_crawler 爬虫失败: {exc}")
 
     try:
         from City import nanjing_amr_bmwj_crawler
