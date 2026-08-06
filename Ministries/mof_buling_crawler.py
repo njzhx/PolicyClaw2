@@ -1,4 +1,5 @@
-from urllib.parse import urljoin
+import time
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,6 +17,7 @@ from db_utils import save_to_policy
 TARGET_URL = "https://www.mof.gov.cn/gkml/bulinggonggao/tongzhitonggao/"
 SOURCE_NAME = "财政部通知公告"
 CATEGORY = "中央部委"
+DETAIL_RETRY_DELAYS = (2, 5, 10)
 
 HEADERS = {
     "User-Agent": (
@@ -36,22 +38,66 @@ def _clean_text(element):
     return "\n".join(lines)
 
 
-def _extract_content(session, article_url, metrics):
-    try:
-        response = session.get(article_url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, "html.parser")
-        content_element = (
-            soup.find("div", class_="TRS_Editor")
-            or soup.find("div", class_="my_doccontent")
-            or soup.find("div", class_="my_conboxzw")
-            or soup.find("div", class_="mainboxerji")
-            or soup.find("div", class_="content")
+def _normalize_article_url(href):
+    """财政部列表仍提供 HTTP 链接，统一升级为 HTTPS。"""
+    article_url = urljoin(TARGET_URL, href)
+    parts = urlsplit(article_url)
+    hostname = (parts.hostname or "").lower()
+    if parts.scheme == "http" and (
+        hostname == "mof.gov.cn" or hostname.endswith(".mof.gov.cn")
+    ):
+        article_url = urlunsplit(
+            ("https", parts.netloc, parts.path, parts.query, parts.fragment)
         )
-        return _clean_text(content_element) if content_element else ""
-    except Exception as exc:
-        metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
-        return ""
+    return article_url
+
+
+def _extract_content(session, article_url, metrics):
+    attempts = len(DETAIL_RETRY_DELAYS) + 1
+    last_error = None
+
+    for attempt in range(attempts):
+        try:
+            response = session.get(article_url, headers=HEADERS, timeout=15)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, "html.parser")
+            content_element = (
+                soup.find("div", class_="TRS_Editor")
+                or soup.find("div", class_="my_doccontent")
+                or soup.find("div", class_="my_conboxzw")
+                or soup.find("div", class_="mainboxerji")
+                or soup.find("div", class_="content")
+            )
+            content = _clean_text(content_element) if content_element else ""
+            if content:
+                if len(content) < 50:
+                    metrics.errors.append(
+                        f"详情页正文疑似过短({len(content)}字): {response.url}"
+                    )
+                return content
+
+            title = soup.title.get_text(" ", strip=True) if soup.title else "无标题"
+            last_error = ValueError(
+                "未找到正文或正文为空"
+                f" (status={response.status_code}, bytes={len(response.content)},"
+                f" title={title[:80]})"
+            )
+        except requests.RequestException as exc:
+            last_error = exc
+        except Exception as exc:
+            last_error = exc
+
+        if attempt < attempts - 1:
+            delay = DETAIL_RETRY_DELAYS[attempt]
+            metrics.errors.append(
+                f"详情页第{attempt + 1}次抓取失败，{delay}秒后重试: "
+                f"{article_url} - {last_error}"
+            )
+            time.sleep(delay)
+
+    metrics.errors.append(f"详情页抓取失败: {article_url} - {last_error}")
+    return ""
 
 
 def scrape_data():
@@ -89,7 +135,7 @@ def scrape_data():
                     )
                     continue
 
-                article_url = urljoin(TARGET_URL, href)
+                article_url = _normalize_article_url(href)
                 metrics.valid_item_count += 1
                 latest_items.append({"title": title, "pub_at": pub_at})
 
