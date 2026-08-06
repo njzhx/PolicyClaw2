@@ -1740,6 +1740,17 @@ if __name__ == "__main__":
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_yjglj_fgwjjjd_crawler 爬虫失败: {exc}")
 
+    # 导入无锡市粮食和物资储备局法规文件及解读爬虫
+    try:
+        from City import wuxi_lswz_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_lswz_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_lswz_fgwjjjd_crawler.run,
+            wuxi_lswz_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_lswz_fgwjjjd_crawler 爬虫失败: {exc}")
+
     try:
         from City import nanjing_amr_bmwj_crawler
         manager.register_crawler(
