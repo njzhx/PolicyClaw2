@@ -1258,6 +1258,17 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"[WARN]  导入中国气象局爬虫失败: {e}")
 
+    # 导入中国气象局规划计划爬虫
+    try:
+        from Ministries import cma_ghjh_crawler
+        manager.register_crawler(
+            "中国气象局_规划计划",
+            cma_ghjh_crawler.run,
+            cma_ghjh_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入中国气象局_规划计划爬虫失败: {e}")
+
     # 导入国家互联网信息办公室爬虫
     try:
         from Ministries import cac_zcfg_crawler
