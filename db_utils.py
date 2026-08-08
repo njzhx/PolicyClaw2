@@ -30,6 +30,86 @@ POLICY_TABLE_FIELDS = (
 
 UPSERT_BATCH_SIZE = 100
 
+_storage_capture_active = False
+_storage_capture_results = []
+
+
+def begin_storage_capture():
+    """开始记录单个爬虫通过公共保存入口产生的 Supabase 结果。"""
+    global _storage_capture_active
+    _storage_capture_results.clear()
+    _storage_capture_active = True
+
+
+def consume_storage_results():
+    """返回并清空当前爬虫产生的 Supabase 结果。"""
+    global _storage_capture_active
+    results = list(_storage_capture_results)
+    _storage_capture_results.clear()
+    _storage_capture_active = False
+    return results
+
+
+def _record_storage_result(source_name, storage_result):
+    if _storage_capture_active and isinstance(storage_result, dict):
+        _storage_capture_results.append(
+            {"source_name": source_name, "storage_result": dict(storage_result)}
+        )
+
+
+def aggregate_storage_results(captured_results):
+    """汇总一个爬虫内一次或多次 save_to_policy() 的真实写入统计。"""
+    results = [
+        entry.get("storage_result")
+        for entry in (captured_results or [])
+        if isinstance(entry, dict) and isinstance(entry.get("storage_result"), dict)
+    ]
+    if not results:
+        return None
+    if len(results) == 1:
+        return dict(results[0])
+
+    attempted = [
+        result for result in results
+        if result.get("status") in {"success", "partial", "error"}
+    ]
+    verified = [result for result in attempted if result.get("counts_verified") is True]
+    inserted_count = sum(int(result.get("inserted_count") or 0) for result in verified)
+    updated_count = sum(int(result.get("updated_count") or 0) for result in verified)
+    saved_count = sum(int(result.get("saved_count") or 0) for result in results)
+    failed_count = sum(int(result.get("failed_count") or 0) for result in results)
+
+    if attempted and all(result.get("status") == "error" for result in attempted):
+        status = "error"
+    elif any(result.get("status") in {"partial", "error"} for result in attempted):
+        status = "partial"
+    elif attempted:
+        status = "success"
+    else:
+        status = "skipped"
+
+    counts_verified = bool(attempted) and len(verified) == len(attempted)
+    if counts_verified:
+        message = f"Supabase 写入完成：新增 {inserted_count} 条，更新 {updated_count} 条"
+        if failed_count:
+            message += f"，失败或无法核验 {failed_count} 条"
+    elif status == "skipped" and all(
+        result.get("message") == "没有数据需要写入" for result in results
+    ):
+        message = "没有数据需要写入"
+    else:
+        message = "部分保存结果未获得按 policy_key 核验的新增/更新统计"
+
+    return {
+        "status": status,
+        "saved_count": saved_count,
+        "inserted_count": inserted_count,
+        "updated_count": updated_count,
+        "failed_count": failed_count,
+        "counts_verified": counts_verified,
+        "message": message,
+    }
+
 
 class PolicySaveItems(list):
     """保留现有列表接口，同时携带结构化 Supabase 写入统计。"""
@@ -37,6 +117,11 @@ class PolicySaveItems(list):
     def __init__(self, items=(), storage_result=None):
         super().__init__(items)
         self.storage_result = storage_result
+
+
+def _save_return(source_name, items, storage_result, api_push_result):
+    _record_storage_result(source_name, storage_result)
+    return PolicySaveItems(items, storage_result), api_push_result
 
 
 class DBUtils:
@@ -146,7 +231,7 @@ class DBUtils:
                 "counts_verified": False,
                 "message": "没有数据需要写入",
             }
-            return PolicySaveItems([], storage_result), None
+            return _save_return(source_name, [], storage_result, None)
 
         try:
             processed_data = self.process_data(data_list, source_name)
@@ -161,10 +246,10 @@ class DBUtils:
                     "counts_verified": False,
                     "message": "数据校验后没有可写入数据",
                 }
-                return PolicySaveItems([], storage_result), {
+                return _save_return(source_name, [], storage_result, {
                     "status": "skipped",
                     "message": "数据校验后没有可写入数据",
-                }
+                })
 
             saved_items = []
             inserted_count = 0
@@ -277,7 +362,9 @@ class DBUtils:
                     "设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。"
                 )
 
-            return PolicySaveItems(processed_data, storage_result), api_push_result
+            return _save_return(
+                source_name, processed_data, storage_result, api_push_result
+            )
 
         except Exception as e:
             print(f"❌ {source_name}：数据处理失败 - {e}")
@@ -290,7 +377,7 @@ class DBUtils:
                 "counts_verified": False,
                 "message": f"数据处理失败 - {e}",
             }
-            return PolicySaveItems([], storage_result), None
+            return _save_return(source_name, [], storage_result, None)
 
     def push_to_api(self, data_list, source_name):
         """将数据推送到目标API接口

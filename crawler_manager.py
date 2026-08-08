@@ -9,6 +9,11 @@ from crawler_core import (
     feishu_notify_enabled,
     get_crawl_date_window,
 )
+from db_utils import (
+    aggregate_storage_results,
+    begin_storage_capture,
+    consume_storage_results,
+)
 
 # 导入飞书通知模块
 try:
@@ -190,6 +195,11 @@ class CrawlerManager:
             print(f"🧪 {name}：{storage_message}")
         elif storage_status == "error":
             print(f"❌ {name}：{storage_message}")
+        elif (
+            storage_status == "skipped"
+            and storage_message == "没有数据需要写入"
+        ):
+            print(f"✅ {name}：{storage_message}")
         else:
             print(f"⚠️  {name}：{storage_message}")
 
@@ -256,6 +266,7 @@ class CrawlerManager:
             self._print_crawler_header(name, target_url)
 
             try:
+                begin_storage_capture()
                 # 创建临时输出缓冲区，用于捕获当前爬虫的输出
                 temp_stdout = StringIO()
                 temp_stderr = StringIO()
@@ -273,10 +284,23 @@ class CrawlerManager:
                     sys.stdout = temp_original_stdout
                     sys.stderr = temp_original_stderr
 
+                captured_storage_result = aggregate_storage_results(
+                    consume_storage_results()
+                )
+
                 # 记录结果
                 execution_time = time.time() - start_time
 
                 adapted_result = adapt_legacy_result(result, crawler_output, name)
+                current_storage_result = adapted_result.get("storage_result") or {}
+                if captured_storage_result and (
+                    current_storage_result.get("status") in {None, "unknown"}
+                    or (
+                        current_storage_result.get("status") in {"success", "partial"}
+                        and current_storage_result.get("counts_verified") is not True
+                    )
+                ):
+                    adapted_result["storage_result"] = captured_storage_result
                 data_list = adapted_result["items"]
                 metrics = adapted_result["metrics"]
                 latest_items = adapted_result.get("latest_items") or []
@@ -316,6 +340,7 @@ class CrawlerManager:
                 self._print_crawler_result(name, self.results[name], crawler_output)
 
             except Exception as e:
+                consume_storage_results()
                 if sys.stdout is not dual_out:
                     try:
                         crawler_output = temp_stdout.getvalue() + temp_stderr.getvalue()
