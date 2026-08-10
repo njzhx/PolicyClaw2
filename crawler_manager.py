@@ -1364,16 +1364,16 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"[WARN]  导入南京市工业和信息化局_法定主动公开内容爬虫失败: {e}")
 
-    # 导入常州市人民政府文字解读爬虫
+    # 导入常州市人民政府政策文件爬虫
     try:
-        from City import changzhou_szf_wzjd_crawler
+        from City import changzhou_szf_zcwj_crawler
         manager.register_crawler(
-            "常州市人民政府_文字解读",
-            changzhou_szf_wzjd_crawler.run,
-            changzhou_szf_wzjd_crawler,
+            "常州市人民政府_政策文件",
+            changzhou_szf_zcwj_crawler.run,
+            changzhou_szf_zcwj_crawler,
         )
     except ImportError as e:
-        print(f"[WARN]  导入常州市人民政府_文字解读爬虫失败: {e}")
+        print(f"[WARN]  导入常州市人民政府_政策文件爬虫失败: {e}")
 
     # 导入无锡市人民政府法规文件及解读爬虫
     try:
@@ -1786,6 +1786,26 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_yjglj_fgwjjjd_crawler 爬虫失败: {exc}")
+    try:
+        from City import wuxi_ylbzj_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_ylbzj_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_ylbzj_fgwjjjd_crawler.run,
+            wuxi_ylbzj_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_ylbzj_fgwjjjd_crawler 爬虫失败: {exc}")
+
+    # 导入无锡市粮食和物资储备局法规文件及解读爬虫
+    try:
+        from City import wuxi_lswz_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_lswz_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_lswz_fgwjjjd_crawler.run,
+            wuxi_lswz_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_lswz_fgwjjjd_crawler 爬虫失败: {exc}")
 
     try:
         from City import nanjing_amr_bmwj_crawler
@@ -1864,6 +1884,17 @@ if __name__ == "__main__":
     except ImportError as exc:
         print(f"[WARN] 导入南京市机关事务管理局部门文件爬虫失败: {exc}")
 
+    # 导入徐州市人民政府市政府文件爬虫
+    try:
+        from City import xuzhou_szf_zfwj_crawler
+        manager.register_crawler(
+            "徐州市人民政府_市政府文件",
+            xuzhou_szf_zfwj_crawler.run,
+            xuzhou_szf_zfwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入徐州市人民政府市政府文件爬虫失败: {exc}")
+
     try:
         from City import wuxi_gzw_fgwjjjd_crawler
         manager.register_crawler(
@@ -1900,11 +1931,52 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_tjj_fgwjjjd_crawler 爬虫失败: {exc}")
+
+    # 导入无锡市信访局法规文件及解读爬虫
+    try:
+        from City import wuxi_xfj_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_xfj_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_xfj_fgwjjjd_crawler.run,
+            wuxi_xfj_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_xfj_fgwjjjd_crawler 爬虫失败: {exc}")
+
+    try:
+        from City import wuxi_gdb_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_gdb_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_gdb_fgwjjjd_crawler.run,
+            wuxi_gdb_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_gdb_fgwjjjd_crawler 爬虫失败: {exc}")
+    try:
+        from City import wuxi_jgglj_fgwjjjd_crawler
+        manager.register_crawler(
+            wuxi_jgglj_fgwjjjd_crawler.SOURCE_NAME,
+            wuxi_jgglj_fgwjjjd_crawler.run,
+            wuxi_jgglj_fgwjjjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入 wuxi_jgglj_fgwjjjd_crawler 爬虫失败: {exc}")
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:
         print(f"[ERROR] 指定爬虫参数无效: {exc}")
         raise SystemExit(2)
+
+    # 导入徐州市科学技术局政策文件爬虫
+    try:
+        from City import xuzhou_kjj_zcwj_crawler
+        manager.register_crawler(
+            "徐州市科学技术局_政策文件",
+            xuzhou_kjj_zcwj_crawler.run,
+            xuzhou_kjj_zcwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入徐州市科学技术局政策文件爬虫失败: {exc}")
 
     # 执行所有爬虫
     if manager.crawlers:
