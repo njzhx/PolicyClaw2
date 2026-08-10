@@ -5,8 +5,6 @@
 目标网址: https://www.changzhou.gov.cn/gi_class/zwgk_05?furl=zfgzbg&cache=no&test=bbb
 数据来源: 通过ajax接口获取 /ns_class/zwgk_18 的JSON响应中的HTML表格
 """
-import os
-from datetime import datetime
 from urllib.parse import urljoin
 
 import requests
@@ -22,7 +20,7 @@ from crawler_core import (
 from db_utils import save_to_policy
 
 
-TARGET_URL = "https://www.changzhou.gov.cn/gi_class/zwgk_05?furl=zfgzbg&cache=no&test=bbb"
+TARGET_URL = "https://www.changzhou.gov.cn/ns_class/zwgk_18"
 SOURCE_NAME = "常州市人民政府_政府工作报告"
 CATEGORY = "常州"
 
@@ -125,38 +123,12 @@ def _extract_content(session, article_url, metrics):
         )
         soup = BeautifulSoup(response.content, "html.parser")
         
-        # 尝试多个可能的正文容器
-        content_selectors = [
-            ("#czfxtext", None),  # 优先使用id
-            ("div.content", None),
-            ("divTRS_EDITOR", None),
-            ("div[class*=TRS_EDITOR]", None),
-            ("div[id*=content]", None),
-            ("div.con", None),
-        ]
-        
-        content = ""
-        for selector, _ in content_selectors:
-            try:
-                elem = soup.select_one(selector)
-                if elem:
-                    text = elem.get_text("\n", strip=True)
-                    if len(text) > 100:  # 正文应该有实际内容
-                        content = text
-                        break
-            except Exception:
-                continue
-        
-        if not content:
-            # 尝试获取整个页面的主要内容区域
-            main_content = soup.find("div", id="czfxtext")
-            if main_content:
-                # 移除导航、页眉等噪声元素
-                for noise in main_content.find_all(["script", "style", "nav", "header", "footer"]):
-                    noise.decompose()
-                content = main_content.get_text("\n", strip=True)
-        
-        return content
+        element = soup.select_one("td.GovInfoContent")
+        if not element:
+            return ""
+        for noise in element.select("script, style, nav, header, footer"):
+            noise.decompose()
+        return element.get_text("\n", strip=True)
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
