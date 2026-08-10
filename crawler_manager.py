@@ -1853,6 +1853,16 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_tjj_fgwjjjd_crawler 爬虫失败: {exc}")
+try:
+    from City import suqian_xfj_zcwj_crawler
+    manager.register_crawler(
+        suqian_xfj_zcwj_crawler.SOURCE_NAME,
+        suqian_xfj_zcwj_crawler.run,
+        suqian_xfj_zcwj_crawler,
+    )
+except ImportError as exc:
+    print("[WARN] import suqian_xfj_zcwj_crawler failed:", exc)
+
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:
