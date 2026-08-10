@@ -1853,6 +1853,18 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_tjj_fgwjjjd_crawler 爬虫失败: {exc}")
+
+    # 导入宿迁市医疗保障局政策文件及解读爬虫
+    try:
+        from City import suqian_ybj_zcfg_crawler
+        manager.register_crawler(
+            suqian_ybj_zcfg_crawler.SOURCE_NAME,
+            suqian_ybj_zcfg_crawler.run,
+            suqian_ybj_zcfg_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入宿迁市医疗保障局_政策文件及解读爬虫失败: {exc}")
+
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:
