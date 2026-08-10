@@ -236,6 +236,12 @@ class FeishuNotifier:
                 elif status in {'success', 'partial'}:
                     icon = "⚠️"
                     detail = "未获得按 policy_key 核验的新增/更新统计"
+                elif (
+                    status == 'skipped'
+                    and storage_result.get('message') == '没有数据需要写入'
+                ):
+                    icon = "✅"
+                    detail = "没有数据需要写入"
                 else:
                     icon = "❌" if status == 'error' else "⚠️"
                     detail = storage_result.get(
