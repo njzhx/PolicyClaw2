@@ -1,7 +1,8 @@
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlunsplit, urlsplit
+from urllib.parse import urlencode, urljoin
 
 import requests
+from bs4 import BeautifulSoup
 
 from crawler_core import (
     CrawlerMetrics,
@@ -13,7 +14,7 @@ from crawler_core import (
 from db_utils import save_to_policy
 
 
-TARGET_URL = "https://www.changzhou.gov.cn/gi_class/zwgk_05?furl=bjgzcwj"
+TARGET_URL = "https://www.changzhou.gov.cn/gova/wjk.php"
 SOURCE_NAME = "常州市人民政府_政策文件"
 CATEGORY = "常州"
 
@@ -148,9 +149,13 @@ def _extract_content(session, article_url, metrics):
     """提取详情页正文"""
     try:
         response = _fetch_with_retry(article_url, timeout=15)
-        parser = _DetailPageParser()
-        parser.feed(response.text)
-        return parser.get_text()
+        soup = BeautifulSoup(response.text, "html.parser")
+        element = soup.select_one("td.GovInfoContent")
+        if not element:
+            return ""
+        for node in element.select("script, style"):
+            node.decompose()
+        return element.get_text("\n", strip=True)
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
@@ -166,19 +171,12 @@ def scrape_data():
     session = requests.Session()
 
     page_index = 1
-    max_pages = 5
+    max_pages = 3000
 
     while page_index <= max_pages:
-        if page_index == 1:
-            page_url = TARGET_URL
-        else:
-            parts = urlsplit(TARGET_URL)
-            query_items = []
-            for key, value in parts.query.split("&"):
-                if key and not key.startswith("page"):
-                    query_items.append(f"{key}={value}")
-            query_items.append(f"page={page_index}")
-            page_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "&".join(query_items), ""))
+        page_url = TARGET_URL
+        if page_index > 1:
+            page_url = f"{TARGET_URL}?{urlencode({'page': page_index})}"
 
         try:
             response = _fetch_with_retry(page_url)
@@ -186,12 +184,22 @@ def scrape_data():
             metrics.errors.append(f"列表页抓取失败 [第{page_index}页]: {exc}")
             break
 
-        parser = _ListPageParser()
-        parser.feed(response.text)
-        nodes = parser.records
+        soup = BeautifulSoup(response.text, "html.parser")
+        nodes = []
+        for row in soup.select("tr"):
+            cells = row.find_all("td", recursive=False)
+            if len(cells) != 5:
+                continue
+            link = cells[1].find("a", href=True)
+            if not link:
+                continue
+            nodes.append({
+                "title": link.get_text(" ", strip=True),
+                "href": link.get("href", "").strip(),
+                "date": cells[4].get_text(" ", strip=True),
+            })
 
-        if page_index == 1:
-            metrics.raw_item_count = len(nodes)
+        metrics.raw_item_count += len(nodes)
 
         if not nodes:
             break
@@ -249,7 +257,7 @@ def scrape_data():
         if oldest_date_on_page and oldest_date_on_page < target_from:
             break
 
-        if len(nodes) < 30:
+        if len(nodes) < 10:
             break
 
         page_index += 1
