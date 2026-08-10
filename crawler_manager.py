@@ -1363,7 +1363,18 @@ if __name__ == "__main__":
         manager.register_crawler("南京市工业和信息化局_法定主动公开内容",nanjing_gxj_xxgk_crawler.run,nanjing_gxj_xxgk_crawler)
     except ImportError as e:
         print(f"[WARN]  导入南京市工业和信息化局_法定主动公开内容爬虫失败: {e}")
-    
+
+    # 导入常州市人民政府文字解读爬虫
+    try:
+        from City import changzhou_szf_wzjd_crawler
+        manager.register_crawler(
+            "常州市人民政府_文字解读",
+            changzhou_szf_wzjd_crawler.run,
+            changzhou_szf_wzjd_crawler,
+        )
+    except ImportError as e:
+        print(f"[WARN]  导入常州市人民政府_文字解读爬虫失败: {e}")
+
     # 导入无锡市人民政府法规文件及解读爬虫
     try:
         from City import wuxi_gov_fgwjjd_crawler
