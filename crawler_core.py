@@ -499,6 +499,21 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
 
     if storage_result is None:
         storage_result = extract_storage_result_from_output(output, len(normalized_items))
+    if (
+        isinstance(storage_result, dict)
+        and storage_result.get("status") == "unknown"
+        and not normalized_items
+        and metrics.target_date_count == 0
+    ):
+        storage_result = {
+            "status": "skipped",
+            "saved_count": 0,
+            "inserted_count": 0,
+            "updated_count": 0,
+            "failed_count": 0,
+            "counts_verified": False,
+            "message": "没有数据需要写入",
+        }
     saved_count = storage_result.get("saved_count") if isinstance(storage_result, dict) else None
     metrics.saved_count = saved_count if isinstance(saved_count, int) else len(normalized_items)
 
