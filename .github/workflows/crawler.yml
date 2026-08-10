@@ -2,7 +2,7 @@ name: 政策爬虫（日常滑动窗口）
 
 on:
   schedule:
-    - cron: '0 19 * * *'
+    - cron: '17 19 * * *'
   workflow_dispatch:
     inputs:
       crawl_window_days:
