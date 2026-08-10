@@ -77,41 +77,41 @@ def _parse_list_page(session, page=1):
         "cache": "no",
         "test": "bbb",
     }
-    
+
     response = _fetch_with_retry(
         AJAX_BASE_URL, session, params=params, timeout=30
     )
     data = response.json()
-    
+
     if data.get("status") != 10:
         return []
-    
+
     html = data.get("html", "")
     soup = BeautifulSoup(html, "html.parser")
-    
+
     articles = []
     rows = soup.find_all("tr")
     for row in rows:
         link_tag = row.find("a")
         if not link_tag:
             continue
-        
+
         title = link_tag.get("title", "") or link_tag.get_text(strip=True)
         href = link_tag.get("href", "")
-        
+
         if not title or not href:
             continue
-        
+
         # 日期在第二个td中
         tds = row.find_all("td")
         raw_date = tds[1].get_text(strip=True) if len(tds) >= 2 else ""
-        
+
         articles.append({
             "title": title,
             "href": href,
             "raw_date": raw_date,
         })
-    
+
     return articles
 
 
@@ -122,7 +122,7 @@ def _extract_content(session, article_url, metrics):
             article_url, session, timeout=15
         )
         soup = BeautifulSoup(response.content, "html.parser")
-        
+
         element = soup.select_one("td.GovInfoContent")
         if not element:
             return ""
@@ -141,63 +141,63 @@ def scrape_data():
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     seen_urls = set()
-    
+
     session = requests.Session()
-    
+
     try:
         # 获取第一页数据
         articles = _parse_list_page(session, page=1)
         metrics.raw_item_count = len(articles)
-        
+
         if not articles:
             metrics.errors.append("列表页未返回任何数据")
             return policies, latest_items, metrics
-        
+
         # 记录最旧日期用于判断是否需要翻页
         oldest_date_on_page = None
-        
+
         for article in articles:
             try:
                 title = article["title"]
                 href = article["href"]
                 raw_date = article["raw_date"]
-                
+
                 # 解析日期
                 pub_at = parse_date(raw_date) if raw_date else None
-                
+
                 if not title or not href:
                     metrics.invalid_item_count += 1
                     continue
-                
+
                 if not pub_at:
                     metrics.invalid_item_count += 1
                     metrics.errors.append(f"无法解析日期: {title[:30]}... (raw: {raw_date})")
                     continue
-                
+
                 # 构建绝对URL
                 article_url = urljoin("https://www.changzhou.gov.cn/", href)
-                
+
                 # 检查重复
                 if article_url in seen_urls:
                     metrics.duplicate_policy_count += 1
                     continue
                 seen_urls.add(article_url)
-                
+
                 metrics.valid_item_count += 1
                 latest_items.append({"title": title, "pub_at": pub_at})
-                
+
                 # 记录最旧日期
                 if oldest_date_on_page is None or pub_at < oldest_date_on_page:
                     oldest_date_on_page = pub_at
-                
+
                 # 日期窗口过滤
                 if not is_target_date(pub_at, target_from, target_to):
                     metrics.filtered_count += 1
                     continue
-                
+
                 # 提取正文
                 content = _extract_content(session, article_url, metrics)
-                
+
                 policies.append({
                     "title": title,
                     "url": article_url,
@@ -210,13 +210,13 @@ def scrape_data():
             except Exception as exc:
                 metrics.invalid_item_count += 1
                 metrics.errors.append(f"列表记录解析失败: {exc}")
-        
+
         # 政府工作报告通常每年只有1-2条，总量很少，不进行翻页
         # 只需判断第一页是否完整即可
-        
+
     except Exception as exc:
         metrics.errors.append(f"列表页抓取失败: {exc}")
-    
+
     metrics.target_date_count = len(policies)
     metrics.empty_content_count = sum(
         1 for item in policies if not item.get("content")
