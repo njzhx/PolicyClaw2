@@ -1962,6 +1962,16 @@ if __name__ == "__main__":
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_jgglj_fgwjjjd_crawler 爬虫失败: {exc}")
     try:
+        from City import xuzhou_zfb_zfwj_crawler
+        manager.register_crawler(
+            xuzhou_zfb_zfwj_crawler.SOURCE_NAME,
+            xuzhou_zfb_zfwj_crawler.run,
+            xuzhou_zfb_zfwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] import xuzhou_zfb_zfwj_crawler failed: {exc}")
+
+    try:
         manager.validate_crawler_selection()
     except ValueError as exc:
         print(f"[ERROR] 指定爬虫参数无效: {exc}")
