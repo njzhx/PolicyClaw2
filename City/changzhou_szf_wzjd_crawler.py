@@ -2,6 +2,7 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin, urlunsplit, urlsplit
 
 import requests
+from bs4 import BeautifulSoup
 
 from crawler_core import (
     CrawlerMetrics,
@@ -140,9 +141,13 @@ def _extract_content(session, article_url, metrics):
     """提取详情页正文"""
     try:
         response = _fetch_with_retry(article_url, timeout=15)
-        parser = _DetailPageParser()
-        parser.feed(response.text)
-        return parser.get_text()
+        soup = BeautifulSoup(response.text, "html.parser")
+        element = soup.select_one("td#czfxfontzoom.NewsContent")
+        if not element:
+            return ""
+        for node in element.select("script, style"):
+            node.decompose()
+        return element.get_text("\n", strip=True)
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
@@ -158,7 +163,7 @@ def scrape_data():
     session = requests.Session()
 
     page_index = 1
-    max_pages = 5
+    max_pages = 1000
 
     while page_index <= max_pages:
         if page_index == 1:
@@ -176,8 +181,7 @@ def scrape_data():
         parser.feed(response.text)
         nodes = parser.records
 
-        if page_index == 1:
-            metrics.raw_item_count = len(nodes)
+        metrics.raw_item_count += len(nodes)
 
         if not nodes:
             break
