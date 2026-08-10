@@ -1890,6 +1890,15 @@ if __name__ == "__main__":
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_tjj_fgwjjjd_crawler 爬虫失败: {exc}")
     try:
+        from City import changzhou_szf_zfgzbg_crawler
+        manager.register_crawler(
+            changzhou_szf_zfgzbg_crawler.SOURCE_NAME,
+            changzhou_szf_zfgzbg_crawler.run,
+            changzhou_szf_zfgzbg_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入常州市人民政府_政府工作报告爬虫失败: {exc}")
+    try:
         manager.validate_crawler_selection()
     except ValueError as exc:
         print(f"[ERROR] 指定爬虫参数无效: {exc}")
