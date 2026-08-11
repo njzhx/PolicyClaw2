@@ -90,17 +90,40 @@ def scrape_data():
     session = requests.Session()
 
     try:
-        response = _fetch_with_retry(TARGET_URL, session, timeout=30)
-        soup = BeautifulSoup(response.content, "html.parser")
+        list_items = []
+        for page_index in range(1, 101):
+            page_url = TARGET_URL
+            if page_index > 1:
+                page_url = TARGET_URL.replace(
+                    "xxgk_list.shtml", f"xxgk_list_{page_index}.shtml"
+                )
+            try:
+                response = _fetch_with_retry(page_url, session, timeout=30)
+            except requests.HTTPError as exc:
+                if page_index > 1 and exc.response is not None and exc.response.status_code == 404:
+                    break
+                raise
+            soup = BeautifulSoup(response.content, "html.parser")
+            list_container = soup.select_one("div.list > ul.listContent")
+            if not list_container:
+                if page_index == 1:
+                    metrics.errors.append(
+                        "未找到列表容器 div.list > ul.listContent"
+                    )
+                break
+            page_items = list_container.select("li")
+            if not page_items:
+                break
+            list_items.extend(page_items)
 
-        # 查找列表容器
-        list_container = soup.select_one("div.list > ul.listContent")
-        if not list_container:
-            metrics.errors.append("未找到列表容器 div.list > ul.listContent")
-            return policies, latest_items, metrics
-
-        # 查找所有列表项
-        list_items = list_container.select("li")
+            page_dates = []
+            for item in page_items:
+                span = item.select_one("span")
+                value = parse_date(span.get_text(strip=True)) if span else None
+                if value:
+                    page_dates.append(value)
+            if page_dates and max(page_dates) < target_from:
+                break
         metrics.raw_item_count = len(list_items)
 
         if not list_items:

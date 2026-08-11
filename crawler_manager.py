@@ -2084,6 +2084,25 @@ except ImportError as exc:
     except ImportError as exc:
         print(f"[WARN] 导入宿迁市人民政府政策解读爬虫失败: {exc}")
 
+    for module_name in (
+        "suqian_szf_szfbwj_crawler",
+        "suqian_szf_zfgzbg_crawler",
+        "suqian_fgw_tzgg_crawler",
+        "suqian_fgw_zcwj_crawler",
+        "suqian_fgw_zcjd_crawler",
+        "suqian_gxj_tzgg_crawler",
+        "suqian_gxj_zcfg_crawler",
+    ):
+        try:
+            module = __import__(f"City.{module_name}", fromlist=[module_name])
+            manager.register_crawler(
+                module.SOURCE_NAME,
+                module.run,
+                module,
+            )
+        except ImportError as exc:
+            print(f"[WARN] import {module_name} failed: {exc}")
+
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:

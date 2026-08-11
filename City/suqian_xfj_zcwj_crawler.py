@@ -22,6 +22,7 @@ TARGET_URL = 'https://xfj.suqian.gov.cn/sqxfj/zcwj/xxgk_list.shtml'
 SOURCE_NAME = "宿迁市信访局_政策文件"
 CATEGORY = "宿迁"
 BASE_URL = 'https://xfj.suqian.gov.cn/'
+MAX_PAGES = 100
 
 _ATTACHMENT_EXTS = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar", ".wps"}
 _RELATED_KEYWORDS = ("解读", "图解", "相关阅读", "政策解读", "相关推荐")
@@ -241,8 +242,29 @@ def scrape_data():
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
-    raw_html = _extract_list_page(session, TARGET_URL)
-    items = _parse_list(raw_html)
+    items = []
+    for page_index in range(1, MAX_PAGES + 1):
+        page_url = TARGET_URL
+        if page_index > 1:
+            page_url = TARGET_URL.replace(
+                "xxgk_list.shtml", f"xxgk_list_{page_index}.shtml"
+            )
+        try:
+            page_items = _parse_list(_extract_list_page(session, page_url))
+        except Exception as exc:
+            metrics.errors.append(f"列表页抓取失败: {page_url} - {exc}")
+            break
+        if not page_items:
+            break
+        items.extend(page_items)
+        page_dates = [
+            parse_date(item["pub_at_str"])
+            for item in page_items
+            if item.get("pub_at_str")
+        ]
+        page_dates = [value for value in page_dates if value]
+        if page_dates and max(page_dates) < target_from:
+            break
     metrics.raw_item_count = len(items)
 
     for item in items:

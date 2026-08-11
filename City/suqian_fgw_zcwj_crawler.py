@@ -121,8 +121,7 @@ def scrape_data():
             if not list_items:
                 break
 
-            if page_index == 1:
-                metrics.raw_item_count = len(list_items)
+            metrics.raw_item_count += len(list_items)
 
             for item in list_items:
                 # 提取标题和链接

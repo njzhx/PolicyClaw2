@@ -105,8 +105,7 @@ def scrape_data():
             if not items:
                 break
 
-            if page_index == 1:
-                metrics.raw_item_count = len(items)
+            metrics.raw_item_count += len(items)
 
             for item in items:
                 link_elem = item.select_one("a")

@@ -62,8 +62,6 @@ def _extract_detail_info(session, article_url, metrics):
         )
         if content_elem:
             content = content_elem.get_text("\n", strip=True)
-        else:
-            metrics.errors.append(f"详情页正文容器未找到: {article_url}")
 
         # 从元数据表格提取发布日期
         # 表格结构：<tr><td>索引号</td><td>014...</td><td>分类</td><td>...</td></tr>
@@ -113,7 +111,9 @@ def scrape_data():
         if page_index == 0:
             page_url = TARGET_URL
         else:
-            page_url = TARGET_URL.replace(".shtml", f"_{page_index}.shtml")
+            page_url = TARGET_URL.replace(
+                ".shtml", f"_{page_index + 1}.shtml"
+            )
 
         try:
             response = session.get(page_url, headers=HEADERS, timeout=30)
@@ -131,8 +131,7 @@ def scrape_data():
             if not nodes:
                 break
 
-            if page_index == 0:
-                metrics.raw_item_count = len(nodes)
+            metrics.raw_item_count += len(nodes)
 
             for node in nodes:
                 try:
@@ -180,6 +179,9 @@ def scrape_data():
                     if not is_target_date(pub_at, target_from, target_to):
                         metrics.filtered_count += 1
                         continue
+
+                    if not content:
+                        metrics.errors.append(f"详情页正文容器未找到: {article_url}")
 
                     policies.append(
                         {

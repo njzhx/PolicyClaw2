@@ -478,12 +478,36 @@ def scrape_data():
     session = requests.Session()
 
     try:
-        resp = session.get(TARGET_URL, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        resp.encoding = resp.apparent_encoding or "utf-8"
-        soup = BeautifulSoup(resp.content, "html.parser")
+        nodes = []
+        for page_index in range(1, 101):
+            page_url = TARGET_URL
+            if page_index > 1:
+                page_url = TARGET_URL.replace(
+                    "xxgk_list.shtml", f"xxgk_list_{page_index}.shtml"
+                )
+            resp = session.get(page_url, headers=HEADERS, timeout=30)
+            if resp.status_code == 404:
+                break
+            resp.raise_for_status()
+            resp.encoding = resp.apparent_encoding or "utf-8"
+            page_nodes = BeautifulSoup(
+                resp.content, "html.parser"
+            ).select("ul.listContent > li")
+            if not page_nodes:
+                break
+            nodes.extend(page_nodes)
 
-        nodes = soup.select("ul.listContent > li")
+            page_dates = []
+            for node in page_nodes:
+                match = re.search(
+                    r"(\d{4}-\d{2}-\d{2})", node.get_text(" ", strip=True)
+                )
+                if match:
+                    value = parse_date(match.group(1))
+                    if value:
+                        page_dates.append(value)
+            if page_dates and max(page_dates) < target_from:
+                break
 
         if not nodes:
             metrics.errors.append("列表页未找到 ul.listContent > li")

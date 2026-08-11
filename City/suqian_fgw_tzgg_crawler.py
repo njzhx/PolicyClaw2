@@ -88,7 +88,7 @@ def _parse_list_page(html, metrics):
         metrics.errors.append("列表页未找到 li.texto 元素")
         return []
 
-    metrics.raw_item_count = len(nodes)
+    metrics.raw_item_count += len(nodes)
     items = []
 
     for node in nodes:

@@ -55,7 +55,7 @@ def _parse_list_page(html, metrics):
         return []
 
     items = list_ul.select("li")
-    metrics.raw_item_count = len(items)
+    metrics.raw_item_count += len(items)
 
     parsed_items = []
     for li in items:
@@ -125,7 +125,9 @@ def _extract_content(session_or_url, article_url, metrics):
 def _get_total_pages(html):
     """从页面HTML中提取总页数"""
     # createPageHTML('page_div',8, 1,'list','shtml',118);
-    page_count_match = re.search(r"createPageHTML\s*\([^)]+,\s*(\d+)\s*,", html)
+    page_count_match = re.search(
+        r"createPageHTML\s*\(\s*[^,]+,\s*(\d+)\s*,", html
+    )
     if page_count_match:
         return int(page_count_match.group(1))
     return 1
