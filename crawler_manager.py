@@ -2057,6 +2057,17 @@ if __name__ == "__main__":
     except ImportError as exc:
         print(f"[WARN] 导入徐州市科学技术局政策文件爬虫失败: {exc}")
 
+    # 导入宿迁市人民政府_市政府办公室文件爬虫
+    try:
+        from City import suqian_szf_szfbwj_crawler
+        manager.register_crawler(
+            "宿迁市人民政府_市政府办公室文件",
+            suqian_szf_szfbwj_crawler.run,
+            suqian_szf_szfbwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入宿迁市人民政府_市政府办公室文件爬虫失败: {exc}")
+
     # 执行所有爬虫
     if manager.crawlers:
         results = manager.run_all_crawlers()
