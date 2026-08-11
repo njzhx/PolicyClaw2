@@ -2046,6 +2046,16 @@ if __name__ == "__main__":
         print(f"[ERROR] 指定爬虫参数无效: {exc}")
         raise SystemExit(2)
 
+    # 导入徐州市民族宗教事务局政策文件爬虫
+    try:
+        from City import xuzhou_mzzj_zcwj_crawler
+        manager.register_crawler(
+            "徐州市民族宗教事务局_政策文件",
+            xuzhou_mzzj_zcwj_crawler.run,
+            xuzhou_mzzj_zcwj_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入徐州市民族宗教事务局政策文件爬虫失败: {exc}")
     # 导入徐州市科学技术局政策文件爬虫
     try:
         from City import xuzhou_kjj_zcwj_crawler
