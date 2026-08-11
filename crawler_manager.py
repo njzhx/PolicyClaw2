@@ -2040,6 +2040,18 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入常州市人民政府_政府工作报告爬虫失败: {exc}")
+
+    # 导入宿迁市人民政府政策解读爬虫
+    try:
+        from City import suqian_szf_zcjd_crawler
+        manager.register_crawler(
+            "宿迁市人民政府_政策解读",
+            suqian_szf_zcjd_crawler.run,
+            suqian_szf_zcjd_crawler,
+        )
+    except ImportError as exc:
+        print(f"[WARN] 导入宿迁市人民政府政策解读爬虫失败: {exc}")
+
     try:
         manager.validate_crawler_selection()
     except ValueError as exc:
