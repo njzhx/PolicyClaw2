@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家消防救援局_政务公开'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

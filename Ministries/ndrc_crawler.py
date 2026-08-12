@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家发展和改革委员会_政策文件'
+
 import os
 import requests
 import re

@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省生态环境厅_通知公告'
+
 
 import requests
 from bs4 import BeautifulSoup

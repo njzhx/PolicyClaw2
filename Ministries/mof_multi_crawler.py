@@ -1,3 +1,5 @@
+SOURCE_NAME = '财政部_多栏目'
+
 from urllib.parse import urljoin
 from types import SimpleNamespace
 import time

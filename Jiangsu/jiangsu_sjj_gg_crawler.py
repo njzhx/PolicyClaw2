@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省数据局_通知公告'
+
 import os
 import requests
 from bs4 import BeautifulSoup

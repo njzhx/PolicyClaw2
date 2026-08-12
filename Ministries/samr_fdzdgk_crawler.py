@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家市场监督管理总局_政府信息公开'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

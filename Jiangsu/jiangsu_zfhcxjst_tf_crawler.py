@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省住房和城乡建设厅_通知文件'
+
 
 import os
 import requests

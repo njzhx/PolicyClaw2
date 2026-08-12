@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省水利厅_规范性文件'
+
 
 import requests
 from bs4 import BeautifulSoup

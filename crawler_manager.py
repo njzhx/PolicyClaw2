@@ -134,8 +134,11 @@ class CrawlerManager:
                     crawler_name = (
                         getattr(crawler_module, "SOURCE_NAME", "")
                         or getattr(crawler_module, "CRAWLER_NAME", "")
-                        or crawler_path.stem
                     )
+                    if not crawler_name:
+                        raise ValueError(
+                            f"Missing Chinese display name for {crawler_path.name}"
+                        )
                     self.register_crawler(
                         str(crawler_name), crawler_func, crawler_module
                     )

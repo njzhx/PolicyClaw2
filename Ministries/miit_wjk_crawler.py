@@ -1,3 +1,5 @@
+SOURCE_NAME = '工业和信息化部_文件库'
+
 
 import requests
 from bs4 import BeautifulSoup

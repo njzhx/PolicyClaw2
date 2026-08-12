@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省人民政府_政府公报'
+
 
 import requests
 from bs4 import BeautifulSoup

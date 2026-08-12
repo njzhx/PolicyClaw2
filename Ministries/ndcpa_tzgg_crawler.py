@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家疾控局_通知公告'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

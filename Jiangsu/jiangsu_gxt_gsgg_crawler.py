@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省工业和信息化厅_公示公告'
+
 
 import requests
 from bs4 import BeautifulSoup

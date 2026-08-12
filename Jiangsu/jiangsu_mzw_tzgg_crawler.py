@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省民族宗教事务委员会_通知公告'
+
 
 import requests
 from bs4 import BeautifulSoup

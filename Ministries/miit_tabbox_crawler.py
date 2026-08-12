@@ -1,3 +1,5 @@
+SOURCE_NAME = '工业和信息化部_网站栏目'
+
 import os
 import requests
 from bs4 import BeautifulSoup

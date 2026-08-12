@@ -1,3 +1,5 @@
+SOURCE_NAME = '中国政府网_政策解读'
+
 import os
 import re
 import requests
