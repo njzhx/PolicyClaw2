@@ -1942,15 +1942,15 @@ if __name__ == "__main__":
         )
     except ImportError as exc:
         print(f"[WARN] 导入 wuxi_tjj_fgwjjjd_crawler 爬虫失败: {exc}")
-try:
-    from City import suqian_xfj_zcwj_crawler
-    manager.register_crawler(
-        suqian_xfj_zcwj_crawler.SOURCE_NAME,
-        suqian_xfj_zcwj_crawler.run,
-        suqian_xfj_zcwj_crawler,
-    )
-except ImportError as exc:
-    print("[WARN] import suqian_xfj_zcwj_crawler failed:", exc)
+    try:
+        from City import suqian_xfj_zcwj_crawler
+        manager.register_crawler(
+            suqian_xfj_zcwj_crawler.SOURCE_NAME,
+            suqian_xfj_zcwj_crawler.run,
+            suqian_xfj_zcwj_crawler,
+        )
+    except ImportError as exc:
+        print("[WARN] import suqian_xfj_zcwj_crawler failed:", exc)
 
 
     # 导入宿迁市医疗保障局政策文件及解读爬虫
@@ -2103,12 +2103,6 @@ except ImportError as exc:
         except ImportError as exc:
             print(f"[WARN] import {module_name} failed: {exc}")
 
-    try:
-        manager.validate_crawler_selection()
-    except ValueError as exc:
-        print(f"[ERROR] 指定爬虫参数无效: {exc}")
-        raise SystemExit(2)
-
     # 导入徐州市民族宗教事务局政策文件爬虫
     try:
         from City import xuzhou_mzzj_zcwj_crawler
@@ -2140,6 +2134,12 @@ except ImportError as exc:
         )
     except ImportError as exc:
         print(f"[WARN] 导入宿迁市人民政府_公示公告爬虫失败: {exc}")
+
+    try:
+        manager.validate_crawler_selection()
+    except ValueError as exc:
+        print(f"[ERROR] 指定爬虫参数无效: {exc}")
+        raise SystemExit(2)
 
     # 执行所有爬虫
     if manager.crawlers:
