@@ -13,6 +13,7 @@ from crawler_core import (
     feishu_notify_enabled,
     get_crawl_date_window,
 )
+from crawler_names import CRAWLER_DISPLAY_NAMES
 from db_utils import (
     aggregate_storage_results,
     begin_storage_capture,
@@ -134,8 +135,12 @@ class CrawlerManager:
                     crawler_name = (
                         getattr(crawler_module, "SOURCE_NAME", "")
                         or getattr(crawler_module, "CRAWLER_NAME", "")
-                        or crawler_path.stem
+                        or CRAWLER_DISPLAY_NAMES.get(crawler_path.name, "")
                     )
+                    if not crawler_name:
+                        raise ValueError(
+                            f"Missing Chinese display name for {crawler_path.name}"
+                        )
                     self.register_crawler(
                         str(crawler_name), crawler_func, crawler_module
                     )
