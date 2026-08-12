@@ -1,0 +1,195 @@
+name: 政策爬虫（Windows Self-hosted）
+
+on:
+  workflow_dispatch:
+    inputs:
+      crawl_mode:
+        description: '日期模式'
+        required: true
+        default: sliding_window
+        type: choice
+        options:
+          - sliding_window
+          - single_date
+          - date_range
+      crawl_window_days:
+        description: '滑动窗口天数（sliding_window）'
+        required: false
+        default: '7'
+        type: string
+      crawl_date:
+        description: '补跑日期 YYYY-MM-DD（single_date）'
+        required: false
+        default: ''
+        type: string
+      crawl_date_from:
+        description: '开始日期 YYYY-MM-DD（date_range）'
+        required: false
+        default: ''
+        type: string
+      crawl_date_to:
+        description: '结束日期 YYYY-MM-DD（date_range）'
+        required: false
+        default: ''
+        type: string
+      crawler_files:
+        description: '指定爬虫文件（留空运行全部；多个用英文逗号分隔）'
+        required: false
+        default: ''
+        type: string
+      enable_supabase_write:
+        description: '是否写入 Supabase'
+        required: false
+        default: false
+        type: boolean
+      enable_api_push:
+        description: '是否推送 API'
+        required: false
+        default: false
+        type: boolean
+      enable_feishu_notify:
+        description: '是否推送飞书结果提醒'
+        required: false
+        default: false
+        type: boolean
+      verbose_crawler_log:
+        description: '是否输出每个爬虫的原始日志'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: policyclaw-self-hosted-windows
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: powershell
+    env:
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+      CRAWL_MODE: ${{ inputs.crawl_mode }}
+      CRAWL_DATE: ${{ inputs.crawl_date }}
+      CRAWL_DATE_FROM: ${{ inputs.crawl_date_from }}
+      CRAWL_DATE_TO: ${{ inputs.crawl_date_to }}
+      CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days }}
+      POLICYCLAW_CRAWLER_FILES: ${{ inputs.crawler_files }}
+      SUPABASE_PROJECT_URL: ${{ secrets.SUPABASE_PROJECT_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      SUPABASE_TABLE: policyclaw2
+      VPS_IP: ${{ secrets.VPS_IP }}
+      FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
+      POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ inputs.enable_supabase_write && '1' || '0' }}
+      POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}
+      POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ inputs.enable_feishu_notify && '1' || '0' }}
+      POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v6
+        with:
+          clean: true
+
+      - name: 设置 Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+          cache: pip
+
+      - name: 显示运行环境
+        run: |
+          python --version
+          Write-Output "Runner: $env:RUNNER_NAME"
+          Write-Output "OS: $env:RUNNER_OS / $env:RUNNER_ARCH"
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version, TotalVisibleMemorySize, FreePhysicalMemory |
+            Format-List
+
+      - name: 校验日期运行参数
+        run: |
+          @'
+          from crawler_core import format_date_window, get_crawl_date_window
+
+          start, end = get_crawl_date_window()
+          print(f"日期参数校验通过，目标日期窗口：{format_date_window(start, end)}")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path -LiteralPath requirements.txt) {
+            python -m pip install -r requirements.txt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          python -m playwright install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 检查 Chrome
+        run: |
+          $chromePaths = @(
+            "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+            "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+            "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+          )
+          $chrome = $chromePaths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } |
+            Select-Object -First 1
+          if ($chrome) {
+            Write-Output "Chrome: $chrome"
+            & $chrome --version
+          } else {
+            Write-Warning "未发现 Google Chrome；普通 HTML/API 爬虫仍可运行，Selenium 爬虫可能失败。"
+          }
+
+      - name: 创建结果目录
+        run: New-Item -ItemType Directory -Force -Path results | Out-Null
+
+      - name: 执行爬虫
+        id: crawler
+        run: |
+          $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+          $outputFile = Join-Path 'results' "crawler_output_$timestamp.md"
+          $errorFile = Join-Path 'results' "crawler_error_$timestamp.log"
+
+          $processArgs = @{
+            FilePath = 'python'
+            ArgumentList = @('-u', 'crawler_manager.py')
+            RedirectStandardOutput = $outputFile
+            RedirectStandardError = $errorFile
+            NoNewWindow = $true
+            PassThru = $true
+            Wait = $true
+          }
+          $process = Start-Process @processArgs
+
+          if (Test-Path -LiteralPath $outputFile) {
+            Get-Content -LiteralPath $outputFile -Encoding UTF8
+          }
+          if ((Test-Path -LiteralPath $errorFile) -and
+              (Get-Item -LiteralPath $errorFile).Length -gt 0) {
+            Write-Output "----- stderr -----"
+            Get-Content -LiteralPath $errorFile -Encoding UTF8
+          }
+
+          exit $process.ExitCode
+
+      - name: 上传运行结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crawler-self-hosted-windows-${{ github.run_number }}
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: 输出执行结果
+        if: always()
+        run: Write-Output '爬虫执行结束，请查看任务日志和上传的运行结果。'
