@@ -156,7 +156,7 @@ jobs:
           echo "timestamp,cpu_used_pct,memory_used_mb,memory_available_mb,disk_used_mb,load_1m,load_5m,load_15m" \
             > "$resource_file"
 
-          python crawler_manager.py > >(tee "$output_file") 2>&1 &
+          python -u crawler_manager.py > "$output_file" 2>&1 &
           crawler_pid=$!
 
           read -r _ user nice system idle iowait irq softirq steal _ < /proc/stat
@@ -201,6 +201,7 @@ jobs:
 
           wait "$crawler_pid"
           crawler_status=$?
+          cat "$output_file"
 
           peak_cpu=$(awk -F, 'NR > 1 && $2 + 0 > max {max=$2} END {printf "%.1f", max+0}' "$resource_file")
           peak_memory_mb=$(awk -F, 'NR > 1 && $3 + 0 > max {max=$3} END {printf "%.0f", max+0}' "$resource_file")
