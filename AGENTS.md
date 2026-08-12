@@ -1,5 +1,13 @@
 # PolicyClaw 2.0 AI 爬虫开发规范
 
+## 爬虫中文名称强制约定
+
+- 每个 `*_crawler.py` 必须在自身模块中声明稳定、可读且包含中文的 `SOURCE_NAME`，例如 `SOURCE_NAME = "江苏省财政厅_公告"`。
+- `SOURCE_NAME` 是自动发现、运行日志、Supabase 运行记录和状态页面使用的唯一展示名称；不得使用 Python 文件名作为展示名称。
+- 新增爬虫只允许新增爬虫文件本身，不得为了名称修改 `crawler_manager.py`，也不得创建或维护 `crawler_names.py`、名称映射字典或其他中央注册表。
+- `crawler_manager.py` 自动扫描目录并直接读取模块的 `SOURCE_NAME`；缺失或不是中文名称时必须明确报错，不得静默回退。
+- `SOURCE_NAME` 应在全仓库保持唯一。栏目不同但机构相同的爬虫，应使用“机构名称_栏目名称”区分。
+
 本文件是为 AI Coding 工具和协作者准备的项目级开发约束。新增、迁移或修复单站爬虫前，必须完整阅读本文件，并以当前仓库中的 `crawler_core.py`、`db_utils.py` 和 `crawler_manager.py` 为最终事实来源。
 
 ## 1. 任务边界
@@ -52,7 +60,7 @@ TARGET_URL = "https://example.gov.cn/list/"
 SOURCE_NAME = "机构名称_栏目名称"
 ```
 
-`TARGET_URL` 会被 `crawler_manager.py` 用于统一输出。`SOURCE_NAME` 是动态发现后的用户可见名称，必须稳定、可读且在所有爬虫中唯一。缺少 `SOURCE_NAME` 时管理器只能回退显示模块文件名；新爬虫不得依赖此回退。
+`TARGET_URL` 会被 `crawler_manager.py` 用于统一输出。`SOURCE_NAME` 是动态发现后的用户可见名称，必须包含中文、稳定、可读且在所有爬虫中唯一。缺少中文 `SOURCE_NAME` 时管理器必须拒绝注册并明确报错，不得回退显示模块文件名。
 
 ## 3. 强制接口
 
@@ -403,9 +411,10 @@ if __name__ == "__main__":
 1. 直接位于上述目录；
 2. 文件名以 `_crawler.py` 结尾；
 3. 模块可以成功导入；
-4. 模块提供可调用的 `run()`。
+4. 模块提供可调用的 `run()`；
+5. 模块自身声明包含中文的 `SOURCE_NAME`。
 
-禁止为新增爬虫修改管理器并添加手动 `import` 或 `register_crawler()`。动态发现优先使用模块的 `SOURCE_NAME` 作为显示名称，使用 `TARGET_URL` 作为目标地址，并使用文件名支持 `POLICYCLAW_CRAWLER_FILES` 精确筛选。
+禁止为新增爬虫修改管理器并添加手动 `import`、`register_crawler()` 或中央名称映射。动态发现只使用模块自身的中文 `SOURCE_NAME` 作为显示名称，使用 `TARGET_URL` 作为目标地址，并使用文件名支持 `POLICYCLAW_CRAWLER_FILES` 精确筛选。
 
 GitHub 托管 Runner 每日执行全量抓取后，会在 `results/` 生成：
 
@@ -436,7 +445,7 @@ AI Coding 工具完成代码后，必须逐项检查：
 - [ ] `run()` 只通过 `save_to_policy()` 执行保存和 API 推送；
 - [ ] 返回 `CrawlerRunResult`，不自行打印统一最终模板；
 - [ ] 未在 `crawler_manager.py` 中添加单站导入或注册代码；
-- [ ] 文件可被动态发现一次，`SOURCE_NAME` 与文件名在全仓库无歧义；
+- [ ] 文件可被动态发现一次，`SOURCE_NAME` 包含中文且在全仓库唯一；
 - [ ] 使用 `POLICYCLAW_CRAWLER_FILES=<file_name>` 时只选中预期文件；
 - [ ] 没有修改无关文件或覆盖用户现有改动；
 - [ ] 没有遗留占位 URL、占位选择器、测试数据或调试断点。
