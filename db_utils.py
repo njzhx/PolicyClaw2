@@ -29,6 +29,7 @@ POLICY_TABLE_FIELDS = (
 )
 
 UPSERT_BATCH_SIZE = 100
+CRAWLER_RUN_TABLE = "crawler_run_records"
 
 _storage_capture_active = False
 _storage_capture_results = []
@@ -153,6 +154,26 @@ class DBUtils:
                 )
             self.client = create_client(self.supabase_url, self.supabase_key)
         return self.client
+
+    def save_crawler_run(self, record):
+        """Persist one crawler health result independently from policy writes."""
+        if not self.supabase_url or not self.supabase_key:
+            return {"status": "skipped", "message": "Supabase credentials are not configured"}
+        if os.getenv("POLICYCLAW_ENABLE_RUN_RECORDS", "1").strip().lower() in {
+            "0", "false", "no", "off"
+        }:
+            return {"status": "skipped", "message": "Crawler run recording is disabled"}
+
+        try:
+            response = (
+                self.get_client()
+                .table(CRAWLER_RUN_TABLE)
+                .upsert(record, on_conflict="run_id,crawler_key")
+                .execute()
+            )
+            return {"status": "success", "data": response.data}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
 
     def process_data(self, data_list, source_name=""):
         """处理数据，准备写入数据库
@@ -572,3 +593,8 @@ def push_daily_status(date_str, success_count, fail_count):
         bool: 是否成功推送
     """
     return db_utils.push_daily_status(date_str, success_count, fail_count)
+
+
+def save_crawler_run(record):
+    """Convenience wrapper for writing one crawler execution record."""
+    return db_utils.save_crawler_run(record)

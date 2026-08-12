@@ -3,6 +3,7 @@ import time
 import sys
 import importlib
 import json
+import uuid
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
@@ -16,6 +17,7 @@ from db_utils import (
     aggregate_storage_results,
     begin_storage_capture,
     consume_storage_results,
+    save_crawler_run,
 )
 
 # 导入飞书通知模块
@@ -54,6 +56,8 @@ class CrawlerManager:
         """初始化爬虫管理器"""
         self.crawlers = []
         self.results = {}
+        self.run_id = os.getenv("POLICYCLAW_RUN_ID", "").strip() or str(uuid.uuid4())
+        self.runner_type = os.getenv("POLICYCLAW_RUNNER_TYPE", "").strip() or "local"
         self.seen_policy_keys = set()
         self.requested_crawler_files = self._parse_crawler_file_selection(
             os.getenv("POLICYCLAW_CRAWLER_FILES", "")
@@ -305,6 +309,12 @@ class CrawlerManager:
             for error in errors[:3]:
                 print(f"   - {str(error)[:220]}")
 
+        run_record_result = result.get("run_record_result") or {}
+        if run_record_result.get("status") == "error":
+            print(f"[RUN RECORD ERROR] {run_record_result.get('message', 'unknown error')}")
+        elif run_record_result.get("status") == "skipped":
+            print(f"[RUN RECORD SKIP] {run_record_result.get('message', '')}")
+
         if self.verbose_crawler_log and crawler_output.strip():
             print("🧾 原始爬虫日志：")
             for line in crawler_output.strip().splitlines()[:80]:
@@ -340,7 +350,9 @@ class CrawlerManager:
 
         total_crawlers = len(self.crawlers)
         for index, (name, crawler_func, target_url, crawler_file) in enumerate(self.crawlers, 1):
+            crawler_key = os.path.splitext(crawler_file)[0]
             start_time = time.time()
+            crawler_started_at = datetime.now().astimezone()
             crawler_output = ""
             self._print_crawler_header(name, target_url)
 
@@ -417,6 +429,24 @@ class CrawlerManager:
                     'raw_log_line_count': len(crawler_output.splitlines()),
                 }
 
+                health_status = "success" if metrics.get("raw_item_count", 0) > 0 else "error"
+                record_result = save_crawler_run({
+                    "run_id": self.run_id,
+                    "crawler_key": crawler_key,
+                    "crawler_name": name,
+                    "runner_type": self.runner_type,
+                    "status": health_status,
+                    "raw_item_count": int(metrics.get("raw_item_count", 0) or 0),
+                    "target_date_count": int(metrics.get("target_date_count", 0) or 0),
+                    "error_message": None if health_status == "success" else "Article list is empty",
+                    "target_url": target_url or None,
+                    "started_at": crawler_started_at.isoformat(),
+                    "finished_at": datetime.now().astimezone().isoformat(),
+                    "duration_seconds": round(execution_time, 2),
+                })
+                self.results[name]["health_status"] = health_status
+                self.results[name]["run_record_result"] = record_result
+
                 self._print_crawler_result(name, self.results[name], crawler_output)
 
             except Exception as e:
@@ -460,6 +490,23 @@ class CrawlerManager:
                     },
                     'raw_log_line_count': len(crawler_output.splitlines()),
                 }
+
+                record_result = save_crawler_run({
+                    "run_id": self.run_id,
+                    "crawler_key": crawler_key,
+                    "crawler_name": name,
+                    "runner_type": self.runner_type,
+                    "status": "error",
+                    "raw_item_count": 0,
+                    "target_date_count": 0,
+                    "error_message": str(e)[:2000],
+                    "target_url": target_url or None,
+                    "started_at": crawler_started_at.isoformat(),
+                    "finished_at": datetime.now().astimezone().isoformat(),
+                    "duration_seconds": round(execution_time, 2),
+                })
+                self.results[name]["health_status"] = "error"
+                self.results[name]["run_record_result"] = record_result
 
                 self._print_crawler_result(name, self.results[name], crawler_output)
 

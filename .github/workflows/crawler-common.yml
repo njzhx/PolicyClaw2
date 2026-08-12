@@ -238,6 +238,9 @@ jobs:
           POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}
           POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ inputs.enable_feishu_notify && '1' || '0' }}
           POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
+          POLICYCLAW_ENABLE_RUN_RECORDS: '1'
+          POLICYCLAW_RUNNER_TYPE: ${{ runner.environment == 'github-hosted' && 'github' || 'self_hosted' }}
+          POLICYCLAW_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 上传运行结果
         if: always()
