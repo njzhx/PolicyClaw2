@@ -73,7 +73,7 @@ jobs:
       run:
         shell: pwsh
     env:
-      POLICYCLAW_PYTHON: 'C:\Python310\python.exe'
+      POLICYCLAW_BASE_PYTHON: 'C:\Python310\python.exe'
       PYTHONUTF8: '1'
       PYTHONUNBUFFERED: '1'
       CRAWL_MODE: ${{ inputs.crawl_mode }}
@@ -103,16 +103,39 @@ jobs:
 
       - name: 显示运行环境
         run: |
-          if (-not (Test-Path -LiteralPath $env:POLICYCLAW_PYTHON)) {
-            throw "Python not found: $env:POLICYCLAW_PYTHON"
+          if (-not (Test-Path -LiteralPath $env:POLICYCLAW_BASE_PYTHON)) {
+            throw "Python not found: $env:POLICYCLAW_BASE_PYTHON"
           }
-          & $env:POLICYCLAW_PYTHON --version
+          & $env:POLICYCLAW_BASE_PYTHON --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Output "Runner: $env:RUNNER_NAME"
           Write-Output "OS: $env:RUNNER_OS / $env:RUNNER_ARCH"
           Get-CimInstance Win32_OperatingSystem |
             Select-Object Caption, Version, TotalVisibleMemorySize, FreePhysicalMemory |
             Format-List
+
+      - name: 创建虚拟环境并安装依赖
+        run: |
+          $venvPath = Join-Path $env:GITHUB_WORKSPACE '.venv'
+          $venvPython = Join-Path $venvPath 'Scripts\python.exe'
+
+          & $env:POLICYCLAW_BASE_PYTHON -m venv $venvPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath $venvPython)) {
+            throw "Virtual environment Python not found: $venvPython"
+          }
+
+          "POLICYCLAW_PYTHON=$venvPython" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          & $venvPython -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (Test-Path -LiteralPath requirements.txt) {
+            & $venvPython -m pip install -r requirements.txt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          & $venvPython -m playwright install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 校验日期运行参数
         run: |
@@ -122,17 +145,6 @@ jobs:
           start, end = get_crawl_date_window()
           print(f"日期参数校验通过，目标日期窗口：{format_date_window(start, end)}")
           '@ | & $env:POLICYCLAW_PYTHON -
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: 安装依赖
-        run: |
-          & $env:POLICYCLAW_PYTHON -m pip install --upgrade pip
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (Test-Path -LiteralPath requirements.txt) {
-            & $env:POLICYCLAW_PYTHON -m pip install -r requirements.txt
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
-          & $env:POLICYCLAW_PYTHON -m playwright install chromium
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 检查 Chrome
