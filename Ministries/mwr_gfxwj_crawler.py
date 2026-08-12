@@ -1,3 +1,5 @@
+SOURCE_NAME = '水利部_规范性文件'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

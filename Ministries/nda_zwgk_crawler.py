@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家数据局_政务公开'
+
 
 import requests
 from bs4 import BeautifulSoup

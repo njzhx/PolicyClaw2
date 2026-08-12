@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省应急管理厅_通知公告'
+
 
 import requests
 from bs4 import BeautifulSoup

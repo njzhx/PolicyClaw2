@@ -1,3 +1,5 @@
+SOURCE_NAME = '文化和旅游部_规范性文件'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

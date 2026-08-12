@@ -1,3 +1,5 @@
+SOURCE_NAME = '科学技术部_政策解读'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

@@ -1,3 +1,5 @@
+SOURCE_NAME = '工业和信息化部_政策解读'
+
 
 import requests
 from bs4 import BeautifulSoup

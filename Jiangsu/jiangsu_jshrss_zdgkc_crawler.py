@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省人力资源和社会保障厅_重大民生信息'
+
 
 import requests
 from bs4 import BeautifulSoup

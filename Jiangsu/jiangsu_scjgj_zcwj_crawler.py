@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省市场监督管理局_政策文件'
+
 
 import requests
 from bs4 import BeautifulSoup

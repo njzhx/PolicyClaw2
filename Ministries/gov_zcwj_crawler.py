@@ -1,3 +1,5 @@
+SOURCE_NAME = '国务院_政策文件'
+
 import os
 import requests
 from bs4 import BeautifulSoup

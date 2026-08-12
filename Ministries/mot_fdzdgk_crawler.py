@@ -1,3 +1,5 @@
+SOURCE_NAME = '交通运输部_政府信息公开'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

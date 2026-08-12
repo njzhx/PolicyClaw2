@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省卫生健康委员会_规范性文件'
+
 
 import requests
 from bs4 import BeautifulSoup

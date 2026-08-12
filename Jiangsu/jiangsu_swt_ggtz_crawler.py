@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省商务厅_公告通知'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

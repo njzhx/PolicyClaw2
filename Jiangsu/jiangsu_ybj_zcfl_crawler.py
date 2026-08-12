@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省医疗保障局_政策法规'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

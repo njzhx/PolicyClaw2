@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省知识产权局_政策文件'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

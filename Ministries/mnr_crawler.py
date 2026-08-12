@@ -1,3 +1,5 @@
+SOURCE_NAME = '自然资源部_政策文件'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

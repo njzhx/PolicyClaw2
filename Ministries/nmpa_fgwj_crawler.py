@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家药品监督管理局_法规文件'
+
 import os
 import sys
 import re

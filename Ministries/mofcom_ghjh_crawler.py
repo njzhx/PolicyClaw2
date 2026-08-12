@@ -1,3 +1,5 @@
+SOURCE_NAME = '商务部_规划计划'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

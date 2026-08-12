@@ -1,3 +1,5 @@
+SOURCE_NAME = '江苏省数据局_政策发布'
+
 
 import requests
 from bs4 import BeautifulSoup

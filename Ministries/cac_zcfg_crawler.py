@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家互联网信息办公室_政策法规'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

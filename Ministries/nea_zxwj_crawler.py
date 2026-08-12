@@ -1,3 +1,5 @@
+SOURCE_NAME = '国家能源局_最新文件'
+
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone

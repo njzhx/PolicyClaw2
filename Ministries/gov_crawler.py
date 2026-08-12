@@ -1,3 +1,5 @@
+SOURCE_NAME = '中国政府网'
+
 
 import os
 import requests
