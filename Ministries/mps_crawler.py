@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
 import asyncio
+from urllib.parse import urljoin
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -106,6 +107,41 @@ def scrape_with_selenium():
         return None
 
 
+def scrape_article_with_selenium(url):
+    if not SELENIUM_AVAILABLE:
+        return ""
+
+    import time
+    options = Options()
+    options.add_argument('--headless=new')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    options.add_argument('--disable-blink-features=AutomationControlled')
+
+    driver = None
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        driver.set_page_load_timeout(45)
+        driver.get(url)
+        time.sleep(5)
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        content_div = (
+            soup.find('div', class_='wordContent w915')
+            or soup.find('div', class_='TRS_Editor')
+            or soup.find('div', class_='content')
+        )
+        return content_div.get_text(separator='\n', strip=True) if content_div else ""
+    except Exception as e:
+        print(f"[WARN] Selenium detail error: {url} - {e}")
+        return ""
+    finally:
+        if driver is not None:
+            driver.quit()
+
+
 def get_article_content(url):
     content = ""
     try:
@@ -124,6 +160,9 @@ def get_article_content(url):
 
     except Exception as e:
         print(f"[WARN] 抓取详情页失败: {e}")
+    if not content:
+        print(f"[INFO] Empty Requests detail response, falling back to Selenium: {url}")
+        content = scrape_article_with_selenium(url)
     return content
 
 
@@ -202,10 +241,7 @@ async def scrape_data_async():
                         if not title or not href:
                             continue
 
-                        if not href.startswith('http'):
-                            article_url = BASE_URL + href
-                        else:
-                            article_url = href
+                        article_url = urljoin(TARGET_URL, href)
 
                         date_spans = li.find_all('span')
                         date_str = ''
