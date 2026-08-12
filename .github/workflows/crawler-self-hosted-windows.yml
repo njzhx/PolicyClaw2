@@ -1,6 +1,8 @@
 name: 政策爬虫（Windows Self-hosted）
 
 on:
+  schedule:
+    - cron: '17 22 * * *'
   workflow_dispatch:
     inputs:
       crawl_mode:
@@ -64,6 +66,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   crawl:
@@ -76,20 +79,20 @@ jobs:
       POLICYCLAW_BASE_PYTHON: 'C:\Python310\python.exe'
       PYTHONUTF8: '1'
       PYTHONUNBUFFERED: '1'
-      CRAWL_MODE: ${{ inputs.crawl_mode }}
-      CRAWL_DATE: ${{ inputs.crawl_date }}
-      CRAWL_DATE_FROM: ${{ inputs.crawl_date_from }}
-      CRAWL_DATE_TO: ${{ inputs.crawl_date_to }}
-      CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days }}
-      POLICYCLAW_CRAWLER_FILES: ${{ inputs.crawler_files }}
+      CRAWL_MODE: ${{ inputs.crawl_mode || 'sliding_window' }}
+      CRAWL_DATE: ${{ inputs.crawl_date || '' }}
+      CRAWL_DATE_FROM: ${{ inputs.crawl_date_from || '' }}
+      CRAWL_DATE_TO: ${{ inputs.crawl_date_to || '' }}
+      CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days || '7' }}
+      POLICYCLAW_CRAWLER_FILES: ${{ inputs.crawler_files || '' }}
       SUPABASE_PROJECT_URL: ${{ secrets.SUPABASE_PROJECT_URL }}
       SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
       SUPABASE_TABLE: policyclaw2
       VPS_IP: ${{ secrets.VPS_IP }}
       FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
-      POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ inputs.enable_supabase_write && '1' || '0' }}
-      POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}
-      POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ inputs.enable_feishu_notify && '1' || '0' }}
+      POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_supabase_write && '1' || '0') }}
+      POLICYCLAW_ENABLE_API_PUSH: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_api_push && '1' || '0') }}
+      POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_feishu_notify && '1' || '0') }}
       POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
 
     steps:
@@ -97,6 +100,63 @@ jobs:
         uses: actions/checkout@v6
         with:
           clean: true
+
+      - name: Find latest hosted crawler run
+        if: github.event_name == 'schedule'
+        id: hosted-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/crawler.yml/runs?branch=main&event=schedule&status=completed&per_page=10"
+          $response = Invoke-RestMethod -Uri $uri -Headers $headers
+          $run = $response.workflow_runs |
+            Where-Object { $_.conclusion -eq 'success' } |
+            Select-Object -First 1
+          if (-not $run) {
+            throw 'No completed successful hosted crawler run found.'
+          }
+          if ([DateTimeOffset]::UtcNow - [DateTimeOffset]$run.updated_at -gt [TimeSpan]::FromHours(12)) {
+            throw "Latest hosted crawler run is older than 12 hours: $($run.html_url)"
+          }
+          "run_id=$($run.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "run_number=$($run.run_number)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Output "Hosted run: $($run.html_url)"
+
+      - name: Download hosted failure manifest
+        if: github.event_name == 'schedule'
+        uses: actions/download-artifact@v4
+        with:
+          name: crawler-results-${{ steps.hosted-run.outputs.run_number }}
+          path: hosted-results
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.hosted-run.outputs.run_id }}
+
+      - name: Prepare hosted retry selection
+        if: github.event_name == 'schedule'
+        run: |
+          $manifestPath = Join-Path 'hosted-results' 'failed_crawlers.json'
+          if (-not (Test-Path -LiteralPath $manifestPath)) {
+            throw "Failure manifest not found: $manifestPath"
+          }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+          $crawlerFiles = @($manifest.crawler_files | Where-Object { $_ })
+          "CRAWL_MODE=date_range" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CRAWL_DATE_FROM=$($manifest.date_from)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CRAWL_DATE_TO=$($manifest.date_to)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "POLICYCLAW_CRAWLER_FILES=$($crawlerFiles -join ',')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if ($crawlerFiles.Count -eq 0) {
+            "POLICYCLAW_SKIP_CRAWL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Output 'Hosted run reported no failed crawler lists; retry will be skipped.'
+          } else {
+            Write-Output "Retry crawler files ($($crawlerFiles.Count)): $($crawlerFiles -join ', ')"
+          }
 
       - name: 创建结果目录
         run: New-Item -ItemType Directory -Force -Path results | Out-Null
@@ -163,6 +223,7 @@ jobs:
 
       - name: 执行爬虫
         id: crawler
+        if: env.POLICYCLAW_SKIP_CRAWL != '1'
         run: |
           $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
           $outputFile = Join-Path 'results' "crawler_output_$timestamp.md"

@@ -1,8 +1,11 @@
 import os
 import time
 import sys
+import importlib
+import json
 from datetime import datetime
 from io import StringIO
+from pathlib import Path
 
 from crawler_core import (
     adapt_legacy_result,
@@ -104,12 +107,36 @@ class CrawlerManager:
             return
 
         target_url = getattr(crawler_module, 'TARGET_URL', '')
-        self.crawlers.append((name, crawler_func, target_url))
+        self.crawlers.append((name, crawler_func, target_url, file_name))
         if self.verbose_crawler_log:
             if target_url:
                 print(f"[REGISTER] {name} ({target_url})")
             else:
                 print(f"[REGISTER] {name}")
+
+    def discover_crawlers(self):
+        """Discover every *_crawler.py module in the three crawler directories."""
+        repository_root = Path(__file__).resolve().parent
+        for package_name in ("Ministries", "Jiangsu", "City"):
+            package_dir = repository_root / package_name
+            for crawler_path in sorted(package_dir.glob("*_crawler.py")):
+                module_name = f"{package_name}.{crawler_path.stem}"
+                try:
+                    crawler_module = importlib.import_module(module_name)
+                    crawler_func = getattr(crawler_module, "run", None)
+                    if not callable(crawler_func):
+                        print(f"[WARN] Skip crawler without run(): {module_name}")
+                        continue
+                    crawler_name = (
+                        getattr(crawler_module, "SOURCE_NAME", "")
+                        or getattr(crawler_module, "CRAWLER_NAME", "")
+                        or crawler_path.stem
+                    )
+                    self.register_crawler(
+                        str(crawler_name), crawler_func, crawler_module
+                    )
+                except Exception as exc:
+                    print(f"[WARN] Failed to import crawler module {module_name}: {exc}")
 
     def validate_crawler_selection(self):
         """在所有模块注册后校验指定文件，并输出本次筛选结果。"""
@@ -160,6 +187,58 @@ class CrawlerManager:
         if filtered_count == 0 and target_count == 0:
             return "SUSPECT"
         return "OK"
+
+    @staticmethod
+    def _list_fetch_failed(result):
+        if result.get("status") == "error":
+            return True
+        metrics = result.get("metrics") or {}
+        list_error_markers = (
+            "列表页抓取失败",
+            "列表页HTTP错误",
+            "API抓取失败",
+            "list request failed",
+            "list page failed",
+        )
+        if any(
+            marker in str(error)
+            for error in (metrics.get("errors") or [])
+            for marker in list_error_markers
+        ):
+            return True
+        return (
+            int(metrics.get("target_date_count") or 0) == 0
+            and int(metrics.get("filtered_count") or 0) == 0
+            and not (result.get("latest_items") or [])
+        )
+
+    def write_failure_manifest(self, crawl_date_from, crawl_date_to):
+        failed_files = sorted({
+            result.get("crawler_file")
+            for result in self.results.values()
+            if self._list_fetch_failed(result) and result.get("crawler_file")
+        })
+        output_dir = Path(os.getenv("POLICYCLAW_RESULTS_DIR", "results"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "source_run_id": os.getenv("GITHUB_RUN_ID", ""),
+            "source_workflow": os.getenv("GITHUB_WORKFLOW", ""),
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "date_from": crawl_date_from.isoformat(),
+            "date_to": crawl_date_to.isoformat(),
+            "crawler_files": failed_files,
+        }
+        manifest_path = output_dir / "failed_crawlers.json"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (output_dir / "failed_crawlers.txt").write_text(
+            "\n".join(failed_files) + ("\n" if failed_files else ""),
+            encoding="utf-8",
+        )
+        print(f"[FAILURE-MANIFEST] {len(failed_files)} crawler file(s): {manifest_path}")
+        return manifest
 
     @staticmethod
     def _print_crawler_header(name, target_url):
@@ -260,7 +339,7 @@ class CrawlerManager:
         total_start_time = time.time()
 
         total_crawlers = len(self.crawlers)
-        for index, (name, crawler_func, target_url) in enumerate(self.crawlers, 1):
+        for index, (name, crawler_func, target_url, crawler_file) in enumerate(self.crawlers, 1):
             start_time = time.time()
             crawler_output = ""
             self._print_crawler_header(name, target_url)
@@ -332,6 +411,7 @@ class CrawlerManager:
                     'execution_time': round(execution_time, 2),
                     'timestamp': datetime.now().isoformat(),
                     'target_url': target_url,
+                    'crawler_file': crawler_file,
                     'storage_result': storage_result,
                     'api_push_result': api_push_result,
                     'raw_log_line_count': len(crawler_output.splitlines()),
@@ -371,6 +451,7 @@ class CrawlerManager:
                     'execution_time': round(execution_time, 2),
                     'timestamp': datetime.now().isoformat(),
                     'target_url': target_url,
+                    'crawler_file': crawler_file,
                     'latest_items': [],
                     'storage_result': {
                         'status': 'error',
@@ -434,6 +515,8 @@ class CrawlerManager:
         # 恢复标准输出
         sys.stdout = original_stdout
         sys.stderr = original_stderr
+
+        self.write_failure_manifest(crawl_date_from, crawl_date_to)
 
         # 输出API推送结果
         print("\n[API] API推送结果:")
@@ -503,7 +586,24 @@ class CrawlerManager:
 # ==========================================
 # 主执行逻辑
 # ==========================================
+def run_discovered_crawlers():
+    try:
+        manager = CrawlerManager()
+        manager.discover_crawlers()
+        manager.validate_crawler_selection()
+    except ValueError as exc:
+        print(f"[ERROR] Invalid crawler selection: {exc}")
+        raise SystemExit(2)
+
+    return manager.run_all_crawlers()
+
+
 if __name__ == "__main__":
+    run_discovered_crawlers()
+
+
+def _legacy_manual_registration():
+    """Deprecated registration list retained temporarily for name migration only."""
     # 创建爬虫管理器
     try:
         manager = CrawlerManager()
