@@ -36,6 +36,9 @@ def _fetch_with_retry(url, max_retries=3, timeout=30):
                 proxies={"http": None, "https": None},
             )
             response.raise_for_status()
+            # 站点响应头未声明 charset，requests 会默认按 ISO-8859-1
+            # 解码；页面自身明确使用 UTF-8，需在读取 response.text 前纠正。
+            response.encoding = "utf-8"
             return response
         except Exception as exc:
             if attempt == max_retries:
