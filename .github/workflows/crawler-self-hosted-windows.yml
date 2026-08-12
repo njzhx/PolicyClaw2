@@ -134,8 +134,6 @@ jobs:
             & $venvPython -m pip install -r requirements.txt
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-          & $venvPython -m playwright install chromium
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 校验日期运行参数
         run: |
