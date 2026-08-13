@@ -58,6 +58,10 @@ class CrawlerManager:
         self.results = {}
         self.run_id = os.getenv("POLICYCLAW_RUN_ID", "").strip() or str(uuid.uuid4())
         self.runner_type = os.getenv("POLICYCLAW_RUNNER_TYPE", "").strip() or "local"
+        if self.runner_type not in {"remote", "local"}:
+            raise ValueError(
+                "POLICYCLAW_RUNNER_TYPE must be 'remote' or 'local'"
+            )
         self.seen_policy_keys = set()
         self.requested_crawler_files = self._parse_crawler_file_selection(
             os.getenv("POLICYCLAW_CRAWLER_FILES", "")

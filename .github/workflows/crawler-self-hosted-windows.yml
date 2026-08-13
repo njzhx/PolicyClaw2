@@ -94,6 +94,7 @@ jobs:
       POLICYCLAW_ENABLE_API_PUSH: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_api_push && '1' || '0') }}
       POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_feishu_notify && '1' || '0') }}
       POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
+      POLICYCLAW_RUNNER_TYPE: local
 
     steps:
       - name: 检出代码
