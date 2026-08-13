@@ -16,7 +16,7 @@ from crawler_core import (
 from db_utils import save_to_policy
 
 
-TARGET_URL = "https://mzj.yangzhou.gov.cn/zcfg/zcjd/"
+TARGET_URL = "https://zjj.yangzhou.gov.cn/zfxxgk/fdzdgknr/zcjd/index.html"
 SOURCE_NAME = "扬州市民族宗教事务局_政策解读"
 CATEGORY = "扬州"
 
@@ -112,12 +112,19 @@ def scrape_data():
                 )
                 params["paramJson"] = param_json_str
 
-            try:
-                api_resp = session.get(api_url, params=params, headers=HEADERS, timeout=30)
-                api_resp.raise_for_status()
-                api_resp.encoding = "utf-8"
-            except Exception as exc:
-                metrics.errors.append(f"API请求失败 [第{page_index}页]: {exc}")
+            api_headers = dict(HEADERS, Referer=TARGET_URL)
+            api_resp = None
+            for attempt in range(3):
+                try:
+                    api_resp = session.get(api_url, params=params, headers=api_headers, timeout=60)
+                    api_resp.raise_for_status()
+                    api_resp.encoding = "utf-8"
+                    break
+                except Exception as exc:
+                    api_resp = None
+                    if attempt == 2:
+                        metrics.errors.append(f"API请求失败 [第{page_index}页]: {exc}")
+            if api_resp is None:
                 break
 
             data = api_resp.json()

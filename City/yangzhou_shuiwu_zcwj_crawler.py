@@ -87,7 +87,7 @@ def scrape_data():
             metrics.errors.append(f"dataproxy请求失败 [第{page_index}页]: {exc}")
             break
 
-        soup = BeautifulSoup(resp.content, "xml_parser")
+        soup = BeautifulSoup(resp.content, "xml")
         if not soup:
             soup = BeautifulSoup(resp.content, "html.parser")
 

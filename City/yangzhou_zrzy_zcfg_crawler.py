@@ -16,7 +16,7 @@ from db_utils import save_to_policy
 
 TARGET_URL = (
     "https://zrzy.jiangsu.gov.cn/gtapp/nrglIndex.action"
-    "?classID=2c9082548c5b0315018c5b4e554a005a&type=1"
+    "?classID=2c9082b55b60eafb015b616f566c0260&type=1"
 )
 SOURCE_NAME = "扬州市自然资源和规划局_政策法规"
 CATEGORY = "扬州"
@@ -28,7 +28,7 @@ HEADERS = {
     ),
 }
 
-CLASS_ID = "2c9082548c5b0315018c5b4e554a005a"
+CLASS_ID = "2c9082b55b60eafb015b616f566c0260"
 
 
 def _fetch(url, timeout=30):
