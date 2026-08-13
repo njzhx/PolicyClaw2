@@ -148,8 +148,10 @@ jobs:
             ConvertFrom-Json
           $crawlerFiles = @($manifest.crawler_files | Where-Object { $_ })
           "CRAWL_MODE=date_range" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CRAWL_DATE=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CRAWL_DATE_FROM=$($manifest.date_from)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CRAWL_DATE_TO=$($manifest.date_to)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "CRAWL_WINDOW_DAYS=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "POLICYCLAW_CRAWLER_FILES=$($crawlerFiles -join ',')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           if ($crawlerFiles.Count -eq 0) {
             "POLICYCLAW_SKIP_CRAWL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
