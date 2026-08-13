@@ -213,6 +213,9 @@ def scrape_data():
     metrics.target_date_count = len(policies)
     metrics.empty_content_count = sum(1 for item in policies if not item.get("content"))
 
+    # 列表中可能包含置顶的旧文章，不能直接把页面顺序当作发布时间顺序。
+    latest_items.sort(key=lambda item: item["pub_at"], reverse=True)
+
     return policies, latest_items[:5], metrics
 
 
