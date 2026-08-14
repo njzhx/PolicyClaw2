@@ -177,11 +177,7 @@ def scrape_data():
                         )
                         if date_match:
                             try:
-                                pub_at = date(
-                                    int(date_match.group(1)),
-                                    int(date_match.group(2)),
-                                    int(date_match.group(3)),
-                                )
+                                pub_at = parse_date(date_match.group(0))
                                 break
                             except ValueError:
                                 pass

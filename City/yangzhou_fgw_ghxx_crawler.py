@@ -173,11 +173,7 @@ def _scrape_column(session, column_url, target_from, target_to, policies, latest
                         )
                         if date_match:
                             try:
-                                pub_at = date(
-                                    int(date_match.group(1)),
-                                    int(date_match.group(2)),
-                                    int(date_match.group(3)),
-                                )
+                                pub_at = parse_date(date_match.group(0))
                                 break
                             except ValueError:
                                 pass
