@@ -16,9 +16,16 @@ from crawler_core import (
 from db_utils import save_to_policy
 
 
-TARGET_URL = "https://www.yangzhou.gov.cn/zfxxgk/fdgkzdnr/fggzgfxwj/gfxwj/index.html"
-SOURCE_NAME = "扬州市国资委_政策法规"
+TARGET_URL = "https://fgw.yangzhou.gov.cn/zfxxgk/fdzdgknr/ghxx/index.html"
+SOURCE_NAME = "扬州市发展和改革委员会_规划信息"
 CATEGORY = "扬州"
+
+# 规划信息聚合页为静态分组页，实际列表在 3 个 jpaas 子栏目
+SUB_COLUMNS = [
+    "https://fgw.yangzhou.gov.cn/zfxxgk/fdzdgknr/ghxx/wngh/index.html",
+    "https://fgw.yangzhou.gov.cn/zfxxgk/fdzdgknr/ghxx/ndjh/index.html",
+    "https://fgw.yangzhou.gov.cn/zfxxgk/fdzdgknr/ghxx/zxgh/index.html",
+]
 
 HEADERS = {
     "User-Agent": (
@@ -66,40 +73,33 @@ def _extract_content(article_url, metrics):
         return ""
 
 
-def scrape_data():
-    policies = []
-    latest_items = []
-    metrics = CrawlerMetrics()
-    target_from, target_to = get_crawl_date_window()
-    session = requests.Session()
-    seen_urls = set()
-
+def _scrape_column(session, column_url, target_from, target_to, policies, latest_items, metrics, seen_urls):
+    """抓取单个 jpaas 子栏目，结果累加到共享的 policies/latest_items/metrics。"""
     try:
-        resp = _fetch(TARGET_URL, timeout=30)
+        resp = _fetch(column_url, timeout=30)
         soup = BeautifulSoup(resp.content, "html.parser")
         script_tag = soup.select_one('script[parsetype="bulidstatic"]')
         if not script_tag:
-            metrics.errors.append("未找到script[parsetype='bulidstatic']")
-            return policies, latest_items, metrics
+            metrics.errors.append(f"未找到script[parsetype='bulidstatic']: {column_url}")
+            return
 
         api_url = script_tag.get("url") or script_tag.get("src")
         if not api_url:
-            metrics.errors.append("script 缺少 url/src 属性")
-            return policies, latest_items, metrics
+            metrics.errors.append(f"script 缺少 url/src 属性: {column_url}")
+            return
 
-        api_url = urljoin(TARGET_URL, api_url)
+        api_url = urljoin(column_url, api_url)
 
         querydata_str = script_tag.get("querydata") or script_tag.get("data")
         if not querydata_str:
-            metrics.errors.append("script 缺少 querydata/data 属性")
-            return policies, latest_items, metrics
+            metrics.errors.append(f"script 缺少 querydata/data 属性: {column_url}")
+            return
 
-        querydata = {}
         try:
             querydata = json.loads(querydata_str.replace("'", '"'))
         except Exception:
             metrics.errors.append(f"querydata 解析失败: {querydata_str[:100]}")
-            return policies, latest_items, metrics
+            return
 
         rows = min(int(querydata.get("rows", 20)), 20)
         page_index = 1
@@ -112,7 +112,7 @@ def scrape_data():
                 )
                 params["paramJson"] = param_json_str
 
-            api_headers = dict(HEADERS, Referer=TARGET_URL)
+            api_headers = dict(HEADERS, Referer=column_url)
             api_resp = None
             for attempt in range(3):
                 try:
@@ -123,7 +123,7 @@ def scrape_data():
                 except Exception as exc:
                     api_resp = None
                     if attempt == 2:
-                        metrics.errors.append(f"API请求失败 [第{page_index}页]: {exc}")
+                        metrics.errors.append(f"API请求失败 [{column_url} 第{page_index}页]: {exc}")
             if api_resp is None:
                 break
 
@@ -131,13 +131,13 @@ def scrape_data():
             html_content = data.get("data", {}).get("html", "")
             if not html_content:
                 if page_index == 1:
-                    metrics.errors.append("API响应无HTML内容")
+                    metrics.errors.append(f"API响应无HTML内容: {column_url}")
                 break
 
             li_soup = BeautifulSoup(html_content, "html.parser")
             nodes = li_soup.find_all("li")
             if not nodes and page_index == 1:
-                metrics.errors.append("API返回无li节点")
+                metrics.errors.append(f"API返回无li节点: {column_url}")
                 break
             if not nodes:
                 break
@@ -158,7 +158,7 @@ def scrape_data():
                         metrics.invalid_item_count += 1
                         continue
 
-                    article_url = urljoin(TARGET_URL, href)
+                    article_url = urljoin(column_url, href)
 
                     if article_url in seen_urls:
                         metrics.duplicate_policy_count += 1
@@ -217,7 +217,25 @@ def scrape_data():
             page_index += 1
 
     except Exception as exc:
-        metrics.errors.append(f"列表页失败: {exc}")
+        metrics.errors.append(f"列表页失败: {column_url} - {exc}")
+
+
+def scrape_data():
+    policies = []
+    latest_items = []
+    metrics = CrawlerMetrics()
+    target_from, target_to = get_crawl_date_window()
+    session = requests.Session()
+    seen_urls = set()
+
+    for column_url in SUB_COLUMNS:
+        _scrape_column(
+            session, column_url, target_from, target_to,
+            policies, latest_items, metrics, seen_urls,
+        )
+
+    # latest_items 按日期倒序取前 5
+    latest_items.sort(key=lambda x: x["pub_at"], reverse=True)
 
     metrics.target_date_count = len(policies)
     metrics.empty_content_count = sum(
