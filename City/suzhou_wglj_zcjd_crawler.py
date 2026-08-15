@@ -16,6 +16,7 @@ from db_utils import save_to_policy
 TARGET_URL = "https://wglj.suzhou.gov.cn/szwhgdhlyj/zcjd/list.shtml"
 SOURCE_NAME = "苏州市文化广电和旅游局_政策解读"
 CATEGORY = "苏州"
+MAX_PAGES = 100
 
 HEADERS = {
     "User-Agent": (
@@ -30,7 +31,7 @@ def _extract_content(session, article_url, metrics):
         response = session.get(article_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
-        element = soup.select_one("#zoomcon UCAPCONTENT")
+        element = soup.select_one("div.text")
         return element.get_text("\n", strip=True) if element else ""
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
@@ -43,16 +44,19 @@ def scrape_data():
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
+    seen_urls = set()
+    seen_page_signatures = set()
 
-    page = 1
-    while True:
+    for page in range(1, MAX_PAGES + 1):
         if page == 1:
             list_url = TARGET_URL
         else:
-            list_url = f"{TARGET_URL}?{page}"
+            list_url = TARGET_URL.replace("list.shtml", f"list_{page}.shtml")
 
         try:
             response = session.get(list_url, headers=HEADERS, timeout=30)
+            if page > 1 and response.status_code == 404:
+                break
             response.raise_for_status()
         except Exception as exc:
             metrics.errors.append(f"列表页抓取失败(page={page}): {exc}")
@@ -63,7 +67,17 @@ def scrape_data():
         if not nodes:
             break
 
+        page_signature = tuple(
+            urljoin(list_url, (link.get("href") or "").strip())
+            for link in (node.select_one("h2 > a") for node in nodes)
+            if link and (link.get("href") or "").strip()
+        )
+        if page_signature in seen_page_signatures:
+            break
+        seen_page_signatures.add(page_signature)
+
         metrics.raw_item_count += len(nodes)
+        oldest_date_on_page = None
 
         for node in nodes:
             try:
@@ -71,7 +85,7 @@ def scrape_data():
                 if not link:
                     metrics.invalid_item_count += 1
                     continue
-                title = link.get_text(" ", strip=True)
+                title = (link.get("title") or link.get_text(" ", strip=True)).strip()
                 href = (link.get("href") or "").strip()
                 date_span = node.select_one("h2 > span")
                 raw_date = date_span.get_text(strip=True) if date_span else ""
@@ -82,8 +96,16 @@ def scrape_data():
                     continue
 
                 article_url = urljoin(list_url, href)
+                if article_url in seen_urls:
+                    metrics.duplicate_policy_count += 1
+                    continue
+                seen_urls.add(article_url)
+
                 metrics.valid_item_count += 1
                 latest_items.append({"title": title, "pub_at": pub_at})
+
+                if oldest_date_on_page is None or pub_at < oldest_date_on_page:
+                    oldest_date_on_page = pub_at
 
                 if not is_target_date(pub_at, target_from, target_to):
                     metrics.filtered_count += 1
@@ -105,7 +127,8 @@ def scrape_data():
                 metrics.invalid_item_count += 1
                 metrics.errors.append(f"列表记录解析失败: {exc}")
 
-        page += 1
+        if oldest_date_on_page and oldest_date_on_page < target_from:
+            break
 
     metrics.target_date_count = len(policies)
     metrics.empty_content_count = sum(
