@@ -86,12 +86,20 @@ def scrape_data():
                 content = ""
                 try:
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
+                    detail_resp.raise_for_status()
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-                    content_elem = detail_soup.select_one('.content') or detail_soup.select_one('#content')
+                    # 该站为 TRS WCM 模板，正文在 div.view；.content/#content 作兜底
+                    content_elem = (
+                        detail_soup.select_one('div.view')
+                        or detail_soup.select_one('.content')
+                        or detail_soup.select_one('#content')
+                    )
                     if content_elem:
-                        content = content_elem.get_text(strip=True)
-                except Exception:
-                    pass
+                        content = content_elem.get_text('\n', strip=True)
+                    else:
+                        print(f"[WARN] 详情页未找到正文容器: {article_url}")
+                except Exception as e:
+                    print(f"[WARN] 详情页抓取失败: {article_url} - {e}")
 
                 policy_data = {
                     'title': title,
