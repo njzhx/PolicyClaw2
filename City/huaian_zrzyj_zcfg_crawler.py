@@ -82,6 +82,7 @@ def scrape_data():
 
     total_pages = 1
     page_index = 1
+    seen_urls = set()
     while page_index <= total_pages and page_index <= MAX_PAGES:
         try:
             soup, html = _fetch_page(session, page_index, metrics)
@@ -98,6 +99,7 @@ def scrape_data():
             metrics.errors.append(f"列表页未解析到条目: page={page_index}")
 
         page_items = []
+        duplicates_before = metrics.duplicate_policy_count
         for cell in cells:
             link = cell.select_one("a[href]")
             if not link:
@@ -110,13 +112,23 @@ def scrape_data():
             if not title or not href or not pub_at:
                 metrics.invalid_item_count += 1
                 continue
+            article_url = urljoin(TARGET_URL, href)
+            if article_url in seen_urls:
+                metrics.duplicate_policy_count += 1
+                continue
+            seen_urls.add(article_url)
             metrics.valid_item_count += 1
             page_items.append(
                 {
                     "title": title,
-                    "url": urljoin(TARGET_URL, href),
+                    "url": article_url,
                     "pub_at": pub_at,
                 }
+            )
+
+        if cells and not page_items and metrics.duplicate_policy_count > duplicates_before:
+            metrics.errors.append(
+                f"列表页重复，已停止翻页: page={page_index}"
             )
 
         for item in page_items:

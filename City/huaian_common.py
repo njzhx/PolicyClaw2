@@ -129,18 +129,20 @@ def _select_containers(soup):
     return containers
 
 
-def _parse_list_items(soup, base_url, metrics, containers):
+def _parse_list_items(soup, base_url, metrics, containers, seen_urls):
     """解析一页列表，返回 [{title, url, pub_at}]（保持页面顺序）。"""
     items = []
-    seen_urls = set()
     for container in containers:
         link = container.select_one("a[href]")
         if not link:
+            metrics.invalid_item_count += 1
             continue
         href = (link.get("href") or "").strip()
         if not href or href.startswith(("javascript:", "#")):
+            metrics.invalid_item_count += 1
             continue
         if not ARTICLE_HREF_RE.search(href):
+            metrics.invalid_item_count += 1
             continue
 
         title = (link.get("title") or "").strip() or link.get_text(" ", strip=True)
@@ -153,6 +155,7 @@ def _parse_list_items(soup, base_url, metrics, containers):
 
         article_url = urljoin(base_url, href)
         if article_url in seen_urls:
+            metrics.duplicate_policy_count += 1
             continue
         seen_urls.add(article_url)
         metrics.valid_item_count += 1
@@ -173,6 +176,7 @@ def scrape_lb_site(list_url, source_name, category, metrics=None):
 
     total_pages = 1
     page_index = 1
+    seen_urls = set()
     while page_index <= total_pages and page_index <= MAX_PAGES:
         page_url = _page_url(list_url, page_index)
         try:
@@ -186,9 +190,12 @@ def scrape_lb_site(list_url, source_name, category, metrics=None):
 
         containers = _select_containers(soup)
         metrics.raw_item_count += len(containers)
-        items = _parse_list_items(soup, list_url, metrics, containers)
+        duplicates_before = metrics.duplicate_policy_count
+        items = _parse_list_items(soup, list_url, metrics, containers, seen_urls)
         if not containers and not items:
             metrics.errors.append(f"列表页未解析到条目: {page_url}")
+        elif not items and metrics.duplicate_policy_count > duplicates_before:
+            metrics.errors.append(f"列表页重复，已停止翻页: {page_url}")
 
         for item in items:
             latest_candidates.append(item)
@@ -238,6 +245,7 @@ def scrape_xxgk_site(api_host, source_name, category, topic="", deptid="", rdept
 
     page_index = 1
     page_size = 50
+    seen_urls = set()
     while page_index <= MAX_PAGES:
         post_data = {
             "page": page_index,
@@ -267,6 +275,7 @@ def scrape_xxgk_site(api_host, source_name, category, topic="", deptid="", rdept
         metrics.raw_item_count += len(records)
 
         page_items = []
+        duplicates_before = metrics.duplicate_policy_count
         for record in records:
             title = str(record.get("title") or "").strip()
             link = str(record.get("link") or "").strip()
@@ -278,8 +287,17 @@ def scrape_xxgk_site(api_host, source_name, category, topic="", deptid="", rdept
             if not title or not article_url or not pub_at:
                 metrics.invalid_item_count += 1
                 continue
+            if article_url in seen_urls:
+                metrics.duplicate_policy_count += 1
+                continue
+            seen_urls.add(article_url)
             metrics.valid_item_count += 1
             page_items.append({"title": title, "url": article_url, "pub_at": pub_at})
+
+        if records and not page_items and metrics.duplicate_policy_count > duplicates_before:
+            metrics.errors.append(
+                f"列表 API 返回重复页，已停止翻页: page={page_index}"
+            )
 
         for item in page_items:
             latest_candidates.append(item)
