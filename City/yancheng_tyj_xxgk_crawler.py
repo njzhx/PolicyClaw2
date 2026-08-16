@@ -185,9 +185,16 @@ def scrape_data():
         new_items = []
         for item in items:
             if item["url"] in seen_urls:
+                metrics.duplicate_policy_count += 1
                 continue
             seen_urls.add(item["url"])
             new_items.append(item)
+
+        if items and not new_items:
+            metrics.errors.append(
+                f"列表第{page}页与已抓取页面重复，已停止翻页"
+            )
+            break
 
         for item in new_items:
             latest_items.append({"title": item["title"], "pub_at": item["pub_at"]})
