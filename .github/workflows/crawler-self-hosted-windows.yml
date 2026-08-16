@@ -115,21 +115,25 @@ jobs:
           }
           $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/crawler.yml/runs?branch=main&event=schedule&status=completed&per_page=10"
           $response = Invoke-RestMethod -Uri $uri -Headers $headers
-          $run = $response.workflow_runs |
-            Where-Object { $_.conclusion -eq 'success' } |
-            Select-Object -First 1
+          $run = $response.workflow_runs | Select-Object -First 1
           if (-not $run) {
-            throw 'No completed successful hosted crawler run found.'
+            "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Warning 'No completed hosted crawler run found within the query result; scheduled self-hosted run will execute all crawlers.'
+            exit 0
           }
           if ([DateTimeOffset]::UtcNow - [DateTimeOffset]$run.updated_at -gt [TimeSpan]::FromHours(12)) {
-            throw "Latest hosted crawler run is older than 12 hours: $($run.html_url)"
+            "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Warning "Latest hosted crawler run is older than 12 hours; scheduled self-hosted run will execute all crawlers: $($run.html_url)"
+            exit 0
           }
+          "found=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "run_id=$($run.id)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "run_number=$($run.run_number)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Output "Hosted run: $($run.html_url)"
+          Write-Output "Hosted run: $($run.html_url) (conclusion=$($run.conclusion))"
 
       - name: Download hosted failure manifest
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && steps.hosted-run.outputs.found == 'true'
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: crawler-results-${{ steps.hosted-run.outputs.run_number }}
@@ -143,7 +147,14 @@ jobs:
         run: |
           $manifestPath = Join-Path 'hosted-results' 'failed_crawlers.json'
           if (-not (Test-Path -LiteralPath $manifestPath)) {
-            throw "Failure manifest not found: $manifestPath"
+            "POLICYCLAW_CRAWLER_FILES=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "POLICYCLAW_SKIP_CRAWL=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            if ('${{ steps.hosted-run.outputs.found }}' -eq 'true') {
+              Write-Warning "Hosted failure manifest is unavailable; scheduled self-hosted run will execute all crawlers: $manifestPath"
+            } else {
+              Write-Output 'No hosted run was found within 12 hours; scheduled self-hosted run will execute all crawlers.'
+            }
+            exit 0
           }
           $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 |
             ConvertFrom-Json
