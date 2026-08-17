@@ -31,12 +31,12 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from crawler_core import (
-    CrawlerSession,
     CrawlerMetrics,
     get_crawl_date_window,
     is_target_date,
     parse_date,
 )
+from crawler_http import CrawlerSession
 
 
 HEADERS = {

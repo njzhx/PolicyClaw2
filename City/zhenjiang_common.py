@@ -24,13 +24,13 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from crawler_core import (
-    CrawlerSession,
     CrawlerMetrics,
     CrawlerRunResult,
     get_crawl_date_window,
     is_target_date,
     parse_date,
 )
+from crawler_http import CrawlerSession
 from db_utils import save_to_policy
 
 
