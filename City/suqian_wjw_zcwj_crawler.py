@@ -35,6 +35,7 @@ HEADERS = {
 }
 
 PAGE_SIZE = 16
+MAX_PAGES = 100
 _BLOCK_TAGS = {'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
                'li', 'ul', 'ol', 'table', 'tr', 'td', 'th',
                'blockquote', 'pre', 'hr'}
@@ -451,9 +452,10 @@ def scrape_data():
     session = requests.Session()
 
     page_index = 0
+    seen_urls = set()
 
     try:
-        while True:
+        while page_index < MAX_PAGES:
             if page_index == 0:
                 page_url = TARGET_URL
             else:
@@ -478,6 +480,7 @@ def scrape_data():
                 metrics.raw_item_count += page_raw_count
 
             oldest_date_on_page = None
+            page_new_count = 0
 
             for node in nodes:
                 try:
@@ -491,7 +494,9 @@ def scrape_data():
                         metrics.invalid_item_count += 1
                         continue
 
-                    list_title = _clean_title(link.get_text(" ", strip=True))
+                    list_title = _clean_title(
+                        link.get("title") or link.get_text(" ", strip=True)
+                    )
                     if not list_title or not href:
                         metrics.invalid_item_count += 1
                         continue
@@ -508,6 +513,11 @@ def scrape_data():
                         continue
 
                     article_url = _normalize_url(href, TARGET_URL)
+                    if article_url in seen_urls:
+                        metrics.duplicate_policy_count += 1
+                        continue
+                    seen_urls.add(article_url)
+                    page_new_count += 1
                     metrics.valid_item_count += 1
                     latest_items.append({"title": list_title, "pub_at": pub_at})
 
@@ -518,12 +528,12 @@ def scrape_data():
                         metrics.filtered_count += 1
                         continue
 
-                    content, final_title = _extract_content(session, article_url, metrics, list_title)
-                    final_title = final_title or list_title
-                    latest_items[-1]["title"] = final_title
+                    content, _ = _extract_content(
+                        session, article_url, metrics, list_title
+                    )
 
                     policies.append({
-                        "title": final_title,
+                        "title": list_title,
                         "url": article_url,
                         "pub_at": pub_at,
                         "content": content,
@@ -535,6 +545,11 @@ def scrape_data():
                     metrics.invalid_item_count += 1
                     metrics.errors.append(f"列表记录解析失败: {exc}")
 
+            if page_raw_count and page_new_count == 0:
+                metrics.errors.append(
+                    f"列表第{page_index + 1}页与已抓取页面重复，已停止翻页"
+                )
+                break
             if oldest_date_on_page and oldest_date_on_page < target_from:
                 break
             if page_raw_count < PAGE_SIZE:
