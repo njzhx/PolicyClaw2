@@ -193,6 +193,7 @@ def scrape_gov_site(host, categorynum, source_name, category, metrics=None):
             break
 
         page_items = []
+        duplicates_before = metrics.duplicate_policy_count
         for record in records:
             title = str(
                 record.get("title") or record.get("realtitle") or ""
@@ -237,6 +238,14 @@ def scrape_gov_site(host, categorynum, source_name, category, metrics=None):
                 )
             )
 
+        if (
+            records
+            and not page_items
+            and metrics.duplicate_policy_count > duplicates_before
+        ):
+            metrics.errors.append(
+                f"列表 API 返回重复页，已停止翻页: page={page_index}"
+            )
         if not page_items:
             break
         # 列表按发布日期倒序：整页最旧一条早于窗口起点时停止翻页
@@ -274,8 +283,10 @@ def scrape_zrzy_site(list_url, source_name, category, metrics=None):
             if page_index == 1:
                 response = session.get(list_url, timeout=LIST_TIMEOUT)
             else:
+                separator = "&" if "?" in list_url else "?"
                 response = session.post(
-                    list_url, data={"cpage": str(page_index)},
+                    f"{list_url}{separator}type=1",
+                    data={"cpage": str(page_index)},
                     timeout=LIST_TIMEOUT,
                 )
             response.raise_for_status()
@@ -289,6 +300,7 @@ def scrape_zrzy_site(list_url, source_name, category, metrics=None):
         metrics.raw_item_count += len(containers)
 
         page_items = []
+        duplicates_before = metrics.duplicate_policy_count
         for container in containers:
             link = container.select_one("a[href]")
             if not link:
@@ -329,6 +341,14 @@ def scrape_zrzy_site(list_url, source_name, category, metrics=None):
                 )
             )
 
+        if (
+            containers
+            and not page_items
+            and metrics.duplicate_policy_count > duplicates_before
+        ):
+            metrics.errors.append(
+                f"列表页重复，已停止翻页: page={page_index}"
+            )
         if not page_items:
             break
         oldest_on_page = min(item["pub_at"] for item in page_items)
@@ -414,6 +434,7 @@ def scrape_credit_site(source_name, category, metrics=None):
                 break
 
             page_items = []
+            duplicates_before = metrics.duplicate_policy_count
             for record in records:
                 title = str(record.get("title") or "").strip()
                 href = str(record.get("url") or "").strip()
@@ -450,6 +471,15 @@ def scrape_credit_site(source_name, category, metrics=None):
                     )
                 )
 
+            if (
+                records
+                and not page_items
+                and metrics.duplicate_policy_count > duplicates_before
+            ):
+                metrics.errors.append(
+                    f"列表 API 返回重复页，已停止翻页: "
+                    f"{column_name} page={page_index}"
+                )
             if not page_items:
                 break
             oldest_on_page = min(item["pub_at"] for item in page_items)
@@ -523,6 +553,7 @@ def scrape_ggzy_site(source_name, category, metrics=None):
             break
 
         page_items = []
+        duplicates_before = metrics.duplicate_policy_count
         for record in records:
             title = str(record.get("title") or "").strip()
             href = str(record.get("href") or "").strip()
@@ -556,6 +587,14 @@ def scrape_ggzy_site(source_name, category, metrics=None):
                 )
             )
 
+        if (
+            records
+            and not page_items
+            and metrics.duplicate_policy_count > duplicates_before
+        ):
+            metrics.errors.append(
+                f"列表 API 返回重复页，已停止翻页: page={page_index}"
+            )
         if not page_items:
             break
         oldest_on_page = min(item["pub_at"] for item in page_items)
