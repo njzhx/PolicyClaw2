@@ -28,10 +28,10 @@ import json
 import re
 from urllib.parse import urljoin
 
-import requests
 from bs4 import BeautifulSoup
 
 from crawler_core import (
+    CrawlerSession,
     CrawlerMetrics,
     get_crawl_date_window,
     is_target_date,
@@ -77,7 +77,7 @@ EXTERNAL_NAV_DOMAINS = (
 
 
 def new_session():
-    session = requests.Session()
+    session = CrawlerSession()
     session.headers.update(HEADERS)
     return session
 
