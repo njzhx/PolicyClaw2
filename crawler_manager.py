@@ -27,8 +27,6 @@ from db_utils import (
 
 
 DEFAULT_CRAWLER_TIMEOUT_SECONDS = 300.0
-DEFAULT_INTER_CRAWLER_DELAY_MIN_SECONDS = 1.0
-DEFAULT_INTER_CRAWLER_DELAY_MAX_SECONDS = 4.0
 
 
 def _crawler_process_worker(module_name, function_name, result_path, timeout_seconds):
@@ -133,19 +131,6 @@ class CrawlerManager:
             "POLICYCLAW_CRAWLER_TIMEOUT_SECONDS",
             DEFAULT_CRAWLER_TIMEOUT_SECONDS,
         )
-        self.inter_crawler_delay_min_seconds = self._nonnegative_float_env(
-            "POLICYCLAW_INTER_CRAWLER_DELAY_MIN_SECONDS",
-            DEFAULT_INTER_CRAWLER_DELAY_MIN_SECONDS,
-        )
-        self.inter_crawler_delay_max_seconds = self._nonnegative_float_env(
-            "POLICYCLAW_INTER_CRAWLER_DELAY_MAX_SECONDS",
-            DEFAULT_INTER_CRAWLER_DELAY_MAX_SECONDS,
-        )
-        if self.inter_crawler_delay_max_seconds < self.inter_crawler_delay_min_seconds:
-            raise ValueError(
-                "POLICYCLAW_INTER_CRAWLER_DELAY_MAX_SECONDS 不能小于 "
-                "POLICYCLAW_INTER_CRAWLER_DELAY_MIN_SECONDS"
-            )
         self.shuffle_crawlers = os.getenv(
             "POLICYCLAW_SHUFFLE_CRAWLERS", "1"
         ).strip().lower() not in {"0", "false", "no", "off"}
@@ -159,17 +144,6 @@ class CrawlerManager:
             raise ValueError(f"{name} 必须是数字") from exc
         if value <= 0:
             raise ValueError(f"{name} 必须大于 0")
-        return value
-
-    @staticmethod
-    def _nonnegative_float_env(name, default):
-        raw_value = os.getenv(name, "").strip()
-        try:
-            value = float(raw_value) if raw_value else float(default)
-        except ValueError as exc:
-            raise ValueError(f"{name} 必须是数字") from exc
-        if value < 0:
-            raise ValueError(f"{name} 不能小于 0")
         return value
 
     def _shuffle_registered_crawlers(self):
@@ -435,6 +409,9 @@ class CrawlerManager:
         else:
             print(f"❌ {name}爬虫：执行失败 - {result.get('error_message', '未知错误')}")
 
+        execution_time = float(result.get("execution_time", 0) or 0)
+        print(f"⏱️  {name}：运行耗时 {execution_time:.2f} 秒")
+
         storage_status = storage_result.get("status")
         storage_message = storage_result.get("message") or "未获得 Supabase 写入状态"
         if storage_status == "success":
@@ -511,8 +488,7 @@ class CrawlerManager:
         print(f"[CRAWLERS] 已注册爬虫: {len(self.crawlers)} 个")
         print(
             f"[GUARD] 单爬虫超时: {self.crawler_timeout_seconds:g} 秒；"
-            f"入口间隔: {self.inter_crawler_delay_min_seconds:g}-"
-            f"{self.inter_crawler_delay_max_seconds:g} 秒；"
+            "入口间隔: 已关闭；"
             f"全局乱序: {'开启' if self.shuffle_crawlers else '关闭'}"
         )
         if self.verbose_crawler_log:
@@ -521,8 +497,7 @@ class CrawlerManager:
 
         total_start_time = time.time()
 
-        total_crawlers = len(self.crawlers)
-        for index, (name, crawler_func, target_url, crawler_file) in enumerate(self.crawlers, 1):
+        for name, crawler_func, target_url, crawler_file in self.crawlers:
             crawler_key = os.path.splitext(crawler_file)[0]
             start_time = time.time()
             crawler_started_at = datetime.now().astimezone()
@@ -659,15 +634,6 @@ class CrawlerManager:
                 self.results[name]["run_record_result"] = record_result
 
                 self._print_crawler_result(name, self.results[name], crawler_output)
-
-            if index < total_crawlers:
-                delay_seconds = random.uniform(
-                    self.inter_crawler_delay_min_seconds,
-                    self.inter_crawler_delay_max_seconds,
-                )
-                if delay_seconds > 0:
-                    print(f"[RATE LIMIT] 下一个爬虫将在 {delay_seconds:.2f} 秒后启动")
-                    time.sleep(delay_seconds)
 
         total_execution_time = time.time() - total_start_time
         end_datetime = datetime.now()
