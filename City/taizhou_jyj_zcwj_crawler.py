@@ -1,0 +1,39 @@
+# -*- coding: utf-8 -*-
+"""泰州市教育局_政策文件 栏目爬虫。
+
+信息公开聚合页（部门文件/部门政策解读各 5 条静态渲染），经 xxgk_more 链接到子栏目 jpaas 列表页抓完整分页。
+"""
+
+from crawler_core import CrawlerRunResult
+from db_utils import save_to_policy
+
+try:
+    from City.taizhou_common import scrape_taizhou_column
+except ImportError:  # pragma: no cover - 兼容直接运行
+    from taizhou_common import scrape_taizhou_column
+
+
+TARGET_URL = "http://jyj.taizhou.gov.cn/xxgk/zcwj/index.html"
+SOURCE_NAME = "泰州市教育局_政策文件"
+CATEGORY = "泰州"
+
+
+def scrape_data():
+    """返回 (policies, latest_items, metrics)。"""
+    return scrape_taizhou_column(TARGET_URL, SOURCE_NAME, CATEGORY)
+
+
+def run():
+    """执行抓取、统一保存，并返回 CrawlerRunResult。"""
+    data, latest_items, metrics = scrape_data()
+    processed_items, api_push_result = save_to_policy(data, SOURCE_NAME)
+    return CrawlerRunResult(
+        items=processed_items,
+        latest_items=latest_items,
+        metrics=metrics,
+        api_push_result=api_push_result,
+    )
+
+
+if __name__ == "__main__":
+    run()
