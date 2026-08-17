@@ -21,10 +21,10 @@ crawler_manager 动态发现），仅供 City 目录下的镇江各单站爬虫�
 import re
 from urllib.parse import urljoin
 
-import requests
 from bs4 import BeautifulSoup
 
 from crawler_core import (
+    CrawlerSession,
     CrawlerMetrics,
     CrawlerRunResult,
     get_crawl_date_window,
@@ -61,7 +61,7 @@ CONTENT_SELECTORS = (
 
 
 def new_session():
-    session = requests.Session()
+    session = CrawlerSession()
     session.headers.update(HEADERS)
     return session
 

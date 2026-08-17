@@ -3,6 +3,11 @@ import time
 import sys
 import importlib
 import json
+import multiprocessing
+import pickle
+import random
+import tempfile
+import traceback
 import uuid
 from datetime import datetime
 from io import StringIO
@@ -19,6 +24,56 @@ from db_utils import (
     consume_storage_results,
     save_crawler_run,
 )
+
+
+DEFAULT_CRAWLER_TIMEOUT_SECONDS = 300.0
+DEFAULT_INTER_CRAWLER_DELAY_MIN_SECONDS = 1.0
+DEFAULT_INTER_CRAWLER_DELAY_MAX_SECONDS = 4.0
+
+
+def _crawler_process_worker(module_name, function_name, result_path, timeout_seconds):
+    """Run one crawler in an isolated process and persist its result for the parent."""
+    temp_stdout = StringIO()
+    temp_stderr = StringIO()
+    payload = {}
+    sys.stdout = temp_stdout
+    sys.stderr = temp_stderr
+    os.environ["POLICYCLAW_CRAWLER_DEADLINE_EPOCH"] = str(
+        time.time() + max(1.0, float(timeout_seconds))
+    )
+
+    try:
+        crawler_module = importlib.import_module(module_name)
+        crawler_func = getattr(crawler_module, function_name)
+        begin_storage_capture()
+        result = crawler_func()
+        payload = {
+            "status": "success",
+            "result": result,
+            "storage_results": consume_storage_results(),
+        }
+    except BaseException as exc:
+        consume_storage_results()
+        payload = {
+            "status": "error",
+            "error": str(exc) or exc.__class__.__name__,
+            "traceback": traceback.format_exc(),
+        }
+    finally:
+        payload["output"] = temp_stdout.getvalue() + temp_stderr.getvalue()
+
+    try:
+        with open(result_path, "wb") as result_file:
+            pickle.dump(payload, result_file, protocol=pickle.HIGHEST_PROTOCOL)
+    except BaseException as exc:
+        fallback = {
+            "status": "error",
+            "error": f"无法序列化爬虫结果: {exc}",
+            "traceback": traceback.format_exc(),
+            "output": payload.get("output", ""),
+        }
+        with open(result_path, "wb") as result_file:
+            pickle.dump(fallback, result_file, protocol=pickle.HIGHEST_PROTOCOL)
 
 # 导入飞书通知模块
 try:
@@ -74,6 +129,108 @@ class CrawlerManager:
             "yes",
             "on",
         }
+        self.crawler_timeout_seconds = self._positive_float_env(
+            "POLICYCLAW_CRAWLER_TIMEOUT_SECONDS",
+            DEFAULT_CRAWLER_TIMEOUT_SECONDS,
+        )
+        self.inter_crawler_delay_min_seconds = self._nonnegative_float_env(
+            "POLICYCLAW_INTER_CRAWLER_DELAY_MIN_SECONDS",
+            DEFAULT_INTER_CRAWLER_DELAY_MIN_SECONDS,
+        )
+        self.inter_crawler_delay_max_seconds = self._nonnegative_float_env(
+            "POLICYCLAW_INTER_CRAWLER_DELAY_MAX_SECONDS",
+            DEFAULT_INTER_CRAWLER_DELAY_MAX_SECONDS,
+        )
+        if self.inter_crawler_delay_max_seconds < self.inter_crawler_delay_min_seconds:
+            raise ValueError(
+                "POLICYCLAW_INTER_CRAWLER_DELAY_MAX_SECONDS 不能小于 "
+                "POLICYCLAW_INTER_CRAWLER_DELAY_MIN_SECONDS"
+            )
+        self.shuffle_crawlers = os.getenv(
+            "POLICYCLAW_SHUFFLE_CRAWLERS", "1"
+        ).strip().lower() not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _positive_float_env(name, default):
+        raw_value = os.getenv(name, "").strip()
+        try:
+            value = float(raw_value) if raw_value else float(default)
+        except ValueError as exc:
+            raise ValueError(f"{name} 必须是数字") from exc
+        if value <= 0:
+            raise ValueError(f"{name} 必须大于 0")
+        return value
+
+    @staticmethod
+    def _nonnegative_float_env(name, default):
+        raw_value = os.getenv(name, "").strip()
+        try:
+            value = float(raw_value) if raw_value else float(default)
+        except ValueError as exc:
+            raise ValueError(f"{name} 必须是数字") from exc
+        if value < 0:
+            raise ValueError(f"{name} 不能小于 0")
+        return value
+
+    def _shuffle_registered_crawlers(self):
+        if not self.shuffle_crawlers or len(self.crawlers) < 2:
+            return
+        seed = os.getenv("POLICYCLAW_CRAWLER_SHUFFLE_SEED", "").strip()
+        if seed:
+            random.Random(seed).shuffle(self.crawlers)
+        else:
+            random.SystemRandom().shuffle(self.crawlers)
+
+    def _run_crawler_in_subprocess(self, crawler_func):
+        result_handle = tempfile.NamedTemporaryFile(
+            prefix="policyclaw-crawler-", suffix=".pickle", delete=False
+        )
+        result_path = Path(result_handle.name)
+        result_handle.close()
+        try:
+            context = multiprocessing.get_context("spawn")
+            process = context.Process(
+                target=_crawler_process_worker,
+                args=(
+                    crawler_func.__module__,
+                    crawler_func.__name__,
+                    str(result_path),
+                    self.crawler_timeout_seconds,
+                ),
+                name=f"policyclaw-{crawler_func.__module__.rsplit('.', 1)[-1]}",
+            )
+            process.start()
+            process.join(self.crawler_timeout_seconds)
+            if process.is_alive():
+                process.terminate()
+                process.join(10)
+                if process.is_alive() and hasattr(process, "kill"):
+                    process.kill()
+                    process.join(5)
+                raise TimeoutError(
+                    f"爬虫运行超过 {self.crawler_timeout_seconds:g} 秒，已终止"
+                )
+
+            if process.exitcode != 0 and result_path.stat().st_size == 0:
+                raise RuntimeError(f"爬虫子进程异常退出，退出码: {process.exitcode}")
+            if result_path.stat().st_size == 0:
+                raise RuntimeError("爬虫子进程未返回结果")
+
+            with result_path.open("rb") as result_file:
+                payload = pickle.load(result_file)
+            if payload.get("status") != "success":
+                detail = payload.get("error") or "爬虫子进程执行失败"
+                raise RuntimeError(detail)
+            return (
+                payload.get("result"),
+                payload.get("output", ""),
+                aggregate_storage_results(payload.get("storage_results")),
+            )
+        finally:
+            try:
+                result_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     @staticmethod
     def _parse_crawler_file_selection(raw_value):
@@ -337,6 +494,8 @@ class CrawlerManager:
         Returns:
             dict: 各爬虫执行结果
         """
+        self._shuffle_registered_crawlers()
+
         # 开始捕获输出
         original_stdout = sys.stdout
         original_stderr = sys.stderr
@@ -350,6 +509,12 @@ class CrawlerManager:
         print(f"\n[RUN] 开始执行爬虫任务 - {start_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"[DATE] 目标日期窗口: {crawl_date_from.isoformat()} 至 {crawl_date_to.isoformat()}")
         print(f"[CRAWLERS] 已注册爬虫: {len(self.crawlers)} 个")
+        print(
+            f"[GUARD] 单爬虫超时: {self.crawler_timeout_seconds:g} 秒；"
+            f"入口间隔: {self.inter_crawler_delay_min_seconds:g}-"
+            f"{self.inter_crawler_delay_max_seconds:g} 秒；"
+            f"全局乱序: {'开启' if self.shuffle_crawlers else '关闭'}"
+        )
         if self.verbose_crawler_log:
             print("[DEBUG] verbose crawler log: ON")
         print("=" * 80)
@@ -365,26 +530,12 @@ class CrawlerManager:
             self._print_crawler_header(name, target_url)
 
             try:
-                begin_storage_capture()
-                # 创建临时输出缓冲区，用于捕获当前爬虫的输出
-                temp_stdout = StringIO()
-                temp_stderr = StringIO()
-                temp_original_stdout = sys.stdout
-                temp_original_stderr = sys.stderr
-                sys.stdout = temp_stdout
-                sys.stderr = temp_stderr
-
-                try:
-                    # 执行爬虫
-                    result = crawler_func()
-                finally:
-                    # 捕获当前爬虫的输出并恢复标准输出
-                    crawler_output = temp_stdout.getvalue() + temp_stderr.getvalue()
-                    sys.stdout = temp_original_stdout
-                    sys.stderr = temp_original_stderr
-
-                captured_storage_result = aggregate_storage_results(
-                    consume_storage_results()
+                (
+                    result,
+                    crawler_output,
+                    captured_storage_result,
+                ) = self._run_crawler_in_subprocess(
+                    crawler_func
                 )
 
                 # 记录结果
@@ -458,15 +609,6 @@ class CrawlerManager:
                 self._print_crawler_result(name, self.results[name], crawler_output)
 
             except Exception as e:
-                consume_storage_results()
-                if sys.stdout is not dual_out:
-                    try:
-                        crawler_output = temp_stdout.getvalue() + temp_stderr.getvalue()
-                    except Exception:
-                        crawler_output = ""
-                    sys.stdout = dual_out
-                    sys.stderr = dual_err
-
                 # 捕获异常，确保其他爬虫继续执行
                 execution_time = time.time() - start_time
                 self.results[name] = {
@@ -517,6 +659,15 @@ class CrawlerManager:
                 self.results[name]["run_record_result"] = record_result
 
                 self._print_crawler_result(name, self.results[name], crawler_output)
+
+            if index < total_crawlers:
+                delay_seconds = random.uniform(
+                    self.inter_crawler_delay_min_seconds,
+                    self.inter_crawler_delay_max_seconds,
+                )
+                if delay_seconds > 0:
+                    print(f"[RATE LIMIT] 下一个爬虫将在 {delay_seconds:.2f} 秒后启动")
+                    time.sleep(delay_seconds)
 
         total_execution_time = time.time() - total_start_time
         end_datetime = datetime.now()
