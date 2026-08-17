@@ -1,11 +1,136 @@
+import argparse
+import json
 import os
 import sys
-import requests
-import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import StringIO
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from crawler_core import feishu_notify_enabled
+
+
+MAX_ABNORMAL_ITEMS = 25
+ABNORMAL_GROUPS = (
+    ("execution_failure", "执行失败"),
+    ("fetch_failure", "列表抓取失败"),
+    ("parse_failure", "解析异常"),
+    ("list_empty", "列表为空"),
+    ("suspect", "未获取到列表信息"),
+)
+LIST_ERROR_MARKERS = (
+    "列表页抓取失败",
+    "列表页HTTP错误",
+    "API抓取失败",
+    "list request failed",
+    "list page failed",
+)
+
+
+def _actions_run_url():
+    server_url = os.getenv("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    repository = os.getenv("GITHUB_REPOSITORY", "").strip("/")
+    run_id = os.getenv("GITHUB_RUN_ID", "").strip()
+    if repository and run_id:
+        return f"{server_url}/{repository}/actions/runs/{run_id}"
+    return ""
+
+
+def _short_text(value, limit=100):
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else f"{text[:limit - 1]}…"
+
+
+def _classify_abnormal(result):
+    metrics = result.get("metrics") or {}
+    errors = [str(error) for error in (metrics.get("errors") or []) if error]
+    if result.get("status") == "error":
+        detail = result.get("error_message") or (errors[0] if errors else "未知错误")
+        return "execution_failure", _short_text(detail)
+
+    list_error = next(
+        (error for error in errors if any(marker in error for marker in LIST_ERROR_MARKERS)),
+        None,
+    )
+    if list_error:
+        return "fetch_failure", _short_text(list_error)
+
+    raw_count = int(metrics.get("raw_item_count") or 0)
+    valid_count = int(metrics.get("valid_item_count") or 0)
+    target_count = int(metrics.get("target_date_count", result.get("crawl_count", 0)) or 0)
+    filtered_count = int(metrics.get("filtered_count", result.get("filter_count", 0)) or 0)
+    if raw_count == 0:
+        return "list_empty", "raw_item_count 为 0"
+    if valid_count == 0:
+        return "parse_failure", f"发现 {raw_count} 条，解析有效数据 0 条"
+    if target_count == 0 and filtered_count == 0 and not result.get("latest_items"):
+        return "suspect", "目标日期与过滤数量均为 0，且无最新条目"
+    return None
+
+
+def build_crawler_summary(results, start_time, end_time):
+    abnormal = []
+    total_inserted = 0
+    total_updated = 0
+    verified_storage_count = 0
+    unverified_storage_count = 0
+    for name, result in results.items():
+        classified = _classify_abnormal(result)
+        if classified:
+            group, detail = classified
+            abnormal.append({
+                "name": name,
+                "group": group,
+                "detail": detail,
+                "target_url": result.get("target_url") or "",
+            })
+
+        storage_result = result.get("storage_result")
+        if not isinstance(storage_result, dict):
+            continue
+        status = storage_result.get("status")
+        if status in {"success", "partial"}:
+            if storage_result.get("counts_verified") is True:
+                verified_storage_count += 1
+                total_inserted += int(storage_result.get("inserted_count") or 0)
+                total_updated += int(storage_result.get("updated_count") or 0)
+            else:
+                unverified_storage_count += 1
+        elif status == "error":
+            unverified_storage_count += 1
+
+    return {
+        "started_at": start_time.isoformat(),
+        "ended_at": end_time.isoformat(),
+        "duration_seconds": max(0, int((end_time - start_time).total_seconds())),
+        "total_count": len(results),
+        "normal_count": len(results) - len(abnormal),
+        "abnormal_count": len(abnormal),
+        "abnormal": abnormal,
+        "inserted_count": total_inserted,
+        "updated_count": total_updated,
+        "verified_storage_count": verified_storage_count,
+        "unverified_storage_count": unverified_storage_count,
+        "actions_run_url": _actions_run_url(),
+    }
+
+
+def write_crawler_summary(results, start_time, end_time, output_path):
+    summary = build_crawler_summary(results, start_time, end_time)
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary
+
+
+def _format_duration(seconds):
+    minutes, seconds = divmod(max(0, int(seconds or 0)), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}小时{minutes}分{seconds}秒"
+    if minutes:
+        return f"{minutes}分{seconds}秒"
+    return f"{seconds}秒"
 
 
 class OutputCapturer:
@@ -133,140 +258,101 @@ class FeishuNotifier:
 
         return self._send(payload)
 
-    def send_crawler_result(self, results, start_time, end_time, full_log=None):
-        """发送爬虫执行结果
-
-        Args:
-            results: 爬虫执行结果字典
-            start_time: 开始时间 (datetime)
-            end_time: 结束时间 (datetime)
-            full_log: 完整的控制台输出日志
-
-        Returns:
-            bool: 是否发送成功
-        """
+    def send_summary(self, summary, workflow_status="success"):
+        """发送精简工作流摘要，只展开异常爬虫。"""
         if not self.enabled:
             return False
 
-        # 转换为北京时间（UTC+8）
-        from datetime import timezone, timedelta
-        tz_utc8 = timezone(timedelta(hours=8))
-        beijing_start_time = start_time.astimezone(tz_utc8)
-
-        # 构建富文本内容
-        content = []
-
-        # 标题行
-        content.append([
-            {"tag": "text", "text": f"🚀 爬虫任务 - {beijing_start_time.strftime('%Y-%m-%d %H:%M:%S')}（北京时间）"}
-        ])
-
-        # 分隔线
-        content.append([{"tag": "text", "text": "==================="}])
-
-        # 显示结构化异常，保留“过滤掉0条”作为异常信号。
-        abnormal_crawlers = []
-        for name, result in results.items():
-            if result['status'] == 'success':
-                metrics = result.get('metrics') or {}
-                raw_item_count = metrics.get('raw_item_count', 0)
-                valid_item_count = metrics.get('valid_item_count', 0)
-                target_date_count = metrics.get('target_date_count', result.get('crawl_count', 0))
-                filter_count = metrics.get('filtered_count', result.get('filter_count', 0))
-                if raw_item_count == 0:
-                    reason = "raw_item_count 为 0"
-                elif valid_item_count == 0:
-                    reason = "valid_item_count 为 0"
-                elif filter_count == 0 and target_date_count == 0:
-                    reason = "过滤掉 0 条且目标日期 0 条"
-                else:
-                    reason = ""
-                if reason:
-                    abnormal_crawlers.append((name, reason))
-
-        if abnormal_crawlers:
-            for name, reason in abnormal_crawlers:
-                result = results[name]
-                target_url = result.get('target_url', '')
-
-                if target_url:
-                    content.append([
-                        {"tag": "text", "text": "📦 "},
-                        {"tag": "a", "text": name, "href": target_url},
-                        {"tag": "text", "text": f" {reason}"}
-                    ])
-                else:
-                    content.append([
-                        {"tag": "text", "text": f"📦 {name} {reason}"}
-                    ])
-
-            # 警告提示
-            content.append([{"tag": "text", "text": "疑似爬取内容不成功，请检查。"}])
+        workflow_status = str(workflow_status or "failure").lower()
+        abnormal_count = int(summary.get("abnormal_count") or 0)
+        if workflow_status == "success" and abnormal_count == 0:
+            icon, status_text = "✅", "GitHub Actions 工作流成功"
+        elif workflow_status == "success":
+            icon, status_text = "⚠️", "GitHub Actions 成功，但有爬虫异常"
         else:
-            content.append([{"tag": "text", "text": "✅ 所有爬虫均正常获取内容"}])
+            icon, status_text = "❌", "GitHub Actions 工作流失败"
 
-        # 分隔线
-        content.append([{"tag": "text", "text": "==================="}])
+        try:
+            start = datetime.fromisoformat(summary.get("started_at")).astimezone(
+                timezone(timedelta(hours=8))
+            )
+            start_text = start.strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError):
+            start_text = "时间未知"
 
-        # 按 Supabase 中 policy_key 写入前后的状态展示真实新增/更新数。
-        total_inserted = 0
-        total_updated = 0
-        storage_results_added = False
-        verified_results_added = False
+        total_count = int(summary.get("total_count") or 0)
+        normal_count = int(summary.get("normal_count") or 0)
+        content = [
+            [{"tag": "text", "text": f"{icon} {status_text}"}],
+            [{"tag": "text", "text": (
+                f"🕒 {start_text}（北京时间）｜"
+                f"用时 {_format_duration(summary.get('duration_seconds'))}"
+            )}],
+            [{"tag": "text", "text": (
+                f"📊 爬虫：共 {total_count} 个｜正常 {normal_count} 个｜"
+                f"异常 {abnormal_count} 个"
+            )}],
+        ]
 
-        for name, result in results.items():
-            storage_result = result.get('storage_result')
-            if storage_result and isinstance(storage_result, dict):
-                storage_results_added = True
-                status = storage_result.get('status', 'unknown')
-                inserted_count = storage_result.get('inserted_count', 0)
-                updated_count = storage_result.get('updated_count', 0)
-                counts_verified = storage_result.get('counts_verified') is True
-                target_url = result.get('target_url', '')
+        verified_count = int(summary.get("verified_storage_count") or 0)
+        unverified_count = int(summary.get("unverified_storage_count") or 0)
+        if verified_count:
+            database_text = (
+                f"🗄️ 数据库：新增 {int(summary.get('inserted_count') or 0)} 条｜"
+                f"更新 {int(summary.get('updated_count') or 0)} 条"
+            )
+            if unverified_count:
+                database_text += f"｜{unverified_count} 个来源未核验"
+        elif unverified_count:
+            database_text = f"🗄️ 数据库：新增数量无法完整核验（{unverified_count} 个来源）"
+        else:
+            database_text = "🗄️ 数据库：本轮没有需要核验的写入"
+        content.append([{"tag": "text", "text": database_text}])
 
-                if status in {'success', 'partial'} and counts_verified:
-                    verified_results_added = True
-                    total_inserted += inserted_count
-                    total_updated += updated_count
-                    icon = "✅" if status == 'success' else "⚠️"
-                    detail = f"新增 {inserted_count} 条，更新 {updated_count} 条"
-                    failed_count = storage_result.get('failed_count', 0)
-                    if failed_count:
-                        detail += f"，失败或无法核验 {failed_count} 条"
-                elif status in {'success', 'partial'}:
-                    icon = "⚠️"
-                    detail = "未获得按 policy_key 核验的新增/更新统计"
-                elif (
-                    status == 'skipped'
-                    and storage_result.get('message') == '没有数据需要写入'
-                ):
-                    icon = "✅"
-                    detail = "没有数据需要写入"
-                else:
-                    icon = "❌" if status == 'error' else "⚠️"
-                    detail = storage_result.get(
-                        'message', '未获得 Supabase 新增/更新统计'
-                    )
-                row = [{"tag": "text", "text": f"{icon} "}]
-                if target_url:
-                    row.append({"tag": "a", "text": name, "href": target_url})
-                else:
-                    row.append({"tag": "text", "text": name})
-                row.append({"tag": "text", "text": f"：{detail}"})
-                content.append(row)
+        abnormal = summary.get("abnormal") or []
+        if abnormal:
+            content.append([{"tag": "text", "text": "──────────"}])
+            displayed_count = 0
+            for group_key, group_label in ABNORMAL_GROUPS:
+                group_items = [item for item in abnormal if item.get("group") == group_key]
+                if not group_items:
+                    continue
+                content.append([{"tag": "text", "text": f"⚠️ {group_label}（{len(group_items)}）"}])
+                for item in group_items:
+                    if displayed_count >= MAX_ABNORMAL_ITEMS:
+                        break
+                    row = [{"tag": "text", "text": "• "}]
+                    if item.get("target_url"):
+                        row.append({
+                            "tag": "a",
+                            "text": _short_text(item.get("name"), 60),
+                            "href": item["target_url"],
+                        })
+                    else:
+                        row.append({"tag": "text", "text": _short_text(item.get("name"), 60)})
+                    row.append({"tag": "text", "text": f"：{_short_text(item.get('detail'))}"})
+                    content.append(row)
+                    displayed_count += 1
+                if displayed_count >= MAX_ABNORMAL_ITEMS:
+                    break
+            hidden_count = len(abnormal) - displayed_count
+            if hidden_count > 0:
+                content.append([{"tag": "text", "text": f"……另有 {hidden_count} 个异常爬虫，请查看完整日志"}])
+        else:
+            content.append([{"tag": "text", "text": "✅ 所有爬虫均正常获取列表信息"}])
 
-        if verified_results_added:
+        actions_url = summary.get("actions_run_url") or _actions_run_url()
+        if actions_url:
             content.append([
-                {"tag": "text", "text": f"📊 Supabase汇总：新增 {total_inserted} 条，更新 {total_updated} 条"}
+                {"tag": "text", "text": "🔗 "},
+                {"tag": "a", "text": "查看 GitHub Actions 运行详情", "href": actions_url},
             ])
-        elif storage_results_added:
-            content.append([{
-                "tag": "text",
-                "text": "📊 Supabase汇总：没有可核验的新增/更新统计",
-            }])
+        return self.send_rich_text("政策爬虫工作流结果", content)
 
-        # 发送富文本消息（标题需包含飞书机器人关键词"政策"）
-        return self.send_rich_text("政策爬虫执行结果", content)
+    def send_crawler_result(self, results, start_time, end_time, full_log=None):
+        """兼容本地运行：直接构建并发送精简摘要。"""
+        summary = build_crawler_summary(results, start_time, end_time)
+        return self.send_summary(summary, workflow_status="success")
 
     def _send(self, payload):
         """发送消息到飞书
@@ -282,15 +368,14 @@ class FeishuNotifier:
             return True
 
         try:
-            response = requests.post(
+            request = Request(
                 self.webhook_url,
-                data=json.dumps(payload),
-                headers={'Content-Type': 'application/json'},
-                timeout=10
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
             )
-            response.raise_for_status()
-
-            result = response.json()
+            with urlopen(request, timeout=10) as response:
+                result = json.loads(response.read().decode("utf-8"))
             if result.get('code') == 0:
                 print("✅ 飞书消息发送成功")
                 return True
@@ -319,3 +404,29 @@ def send_crawler_result(results, start_time, end_time, full_log=None):
     """发送爬虫执行结果（便捷函数）"""
     notifier = get_notifier()
     return notifier.send_crawler_result(results, start_time, end_time, full_log)
+
+
+def send_summary_file(summary_file, workflow_status):
+    path = Path(summary_file)
+    if path.exists():
+        summary = json.loads(path.read_text(encoding="utf-8"))
+    else:
+        now = datetime.now().astimezone()
+        summary = build_crawler_summary({}, now, now)
+    return get_notifier().send_summary(summary, workflow_status)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="发送 PolicyClaw 飞书工作流摘要")
+    parser.add_argument("--summary-file", required=True)
+    parser.add_argument("--workflow-status", default="failure")
+    args = parser.parse_args()
+    if not os.getenv("FEISHU_BOT_WEBHOOK"):
+        print("[FEISHU] skipped: FEISHU_BOT_WEBHOOK not configured")
+        return
+    if not send_summary_file(args.summary_file, args.workflow_status):
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
