@@ -92,7 +92,12 @@ def scrape_data():
                     detail_resp = requests.get(article_url, headers=headers, timeout=15)
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
 
-                    zoom_elem = detail_soup.find('div', id='Zoom')
+                    zoom_elem = (
+                        detail_soup.select_one('div.view.TRS_UEDITOR')
+                        or detail_soup.select_one('div.TRS_UEDITOR')
+                        or detail_soup.find('div', id='Zoom')
+                        or detail_soup.find('div', id='zoom')
+                    )
                     if zoom_elem:
                         text = zoom_elem.get_text(separator='\n', strip=True)
                         lines = [line.strip() for line in text.split('\n') if line.strip()]

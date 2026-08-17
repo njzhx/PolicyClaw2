@@ -30,6 +30,9 @@ try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
     from webdriver_manager.chrome import ChromeDriverManager
     SELENIUM_AVAILABLE = True
 except ImportError:
@@ -81,7 +84,6 @@ def scrape_with_selenium():
     if not SELENIUM_AVAILABLE:
         return None
 
-    import time
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
@@ -128,10 +130,15 @@ def scrape_article_with_selenium(url):
         driver = webdriver.Chrome(service=service, options=options)
         driver.set_page_load_timeout(45)
         driver.get(url)
-        time.sleep(5)
+        WebDriverWait(driver, 30).until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "div#ztdx.wordContent.w915, div.wordContent.w915")
+            )
+        )
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         content_div = (
-            soup.find('div', class_='wordContent w915')
+            soup.select_one('div#ztdx.wordContent.w915')
+            or soup.select_one('div.wordContent.w915')
             or soup.find('div', class_='TRS_Editor')
             or soup.find('div', class_='content')
         )
@@ -148,11 +155,16 @@ def get_article_content(url):
     content = ""
     try:
         response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code == 521 or '__jsl_clearance_s' in response.text:
+            raise requests.HTTPError('公安部详情页触发 JavaScript Cookie 验证')
         response.raise_for_status()
         response.encoding = 'utf-8'
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        content_div = soup.find('div', class_='wordContent w915')
+        content_div = (
+            soup.select_one('div#ztdx.wordContent.w915')
+            or soup.select_one('div.wordContent.w915')
+        )
         if content_div:
             content = content_div.get_text(separator='\n', strip=True)
         else:

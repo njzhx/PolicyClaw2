@@ -37,7 +37,13 @@ def _extract_content(session, article_url, metrics):
         response = session.get(article_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
-        content_elem = soup.select_one("#zoomcon UCAPCONTENT") or soup.select_one("#zoomcon")
+        content_elem = (
+            soup.select_one("#zoomcon UCAPCONTENT")
+            or soup.select_one("#zoomcon")
+            or soup.select_one("#ztdx")
+            or soup.select_one(".content")
+            or soup.select_one(".TRS_Editor")
+        )
         if not content_elem:
             return ""
         for tag_name in ("script", "style", "noscript", "iframe"):

@@ -79,7 +79,7 @@ def scrape_data():
                     continue
 
                 # 清理链接
-                href = href.replace('"', '')
+                href = href.replace('"', '').replace('\\', '').replace('%5C', '')
 
                 # 构建完整URL
                 if href.startswith('/'):
@@ -114,10 +114,13 @@ def scrape_data():
 
                     # 查找内容区域
                     content_div = None
+                    content_div = detail_soup.select_one('.ccontent')
                     divs = detail_soup.find_all('div')
                     for div in divs:
+                        if content_div:
+                            break
                         text = div.get_text(strip=True)
-                        if text and len(text) > 500:
+                        if text and len(text) > 100:
                             content_div = div
                             break
 

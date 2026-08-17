@@ -132,14 +132,18 @@ def scrape_data():
                     # 使用XPath查找内容区域
                     # 注意：BeautifulSoup不直接支持XPath，我们使用CSS选择器来模拟
                     # XPath: //div[@class="article_con article_con_title"]
-                    content_div = detail_soup.select_one('.article_con.article_con_title')
+                    content_div = (
+                        detail_soup.select_one('.TRS_Editor')
+                        or detail_soup.select_one('.article_con.article_con_title')
+                        or detail_soup.select_one('.article_l .article_con')
+                    )
 
                     # 如果找不到特定的内容区域，尝试查找包含大量文本的div
                     if not content_div:
                         divs = detail_soup.find_all('div')
                         for div in divs:
                             text = div.get_text(strip=True)
-                            if text and len(text) > 500:
+                            if text and len(text) > 100:
                                 content_div = div
                                 break
 
