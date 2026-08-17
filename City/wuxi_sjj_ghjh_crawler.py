@@ -125,7 +125,10 @@ def _extract_content(session, article_url, metrics):
 
         # 尝试多个正文选择器
         content_elem = (
-            soup.select_one("#zoom")
+            soup.select_one(".mainCont.article")
+            or soup.select_one(".mainCont")
+            or soup.select_one(".article")
+            or soup.select_one("#zoom")
             or soup.select_one("#UCAP-CONTENT")
             or soup.select_one(".TRS_UEDITOR")
             or soup.select_one(".content")

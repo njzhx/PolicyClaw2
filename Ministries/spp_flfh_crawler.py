@@ -92,7 +92,11 @@ def scrape_data():
                     detail_resp.encoding = detail_resp.apparent_encoding
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
 
-                    content_elem = detail_soup.find('div', class_='Custom_UnionStyle')
+                    content_elem = detail_soup.select_one('div#fontzoom.wsfbh_detail_con')
+                    if not content_elem:
+                        content_elem = detail_soup.find('div', id='fontzoom')
+                    if not content_elem:
+                        content_elem = detail_soup.find('div', class_='Custom_UnionStyle')
                     if not content_elem:
                         content_elem = detail_soup.find('div', id='zoom')
                     if not content_elem:

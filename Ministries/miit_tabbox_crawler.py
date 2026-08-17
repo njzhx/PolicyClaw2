@@ -129,6 +129,7 @@ def scrape_data():
                     content_div = None
                     # 尝试不同的内容区域选择器
                     content_selectors = [
+                        '.ccontent',
                         '.article-content',
                         '.content',
                         '#content',
@@ -145,7 +146,7 @@ def scrape_data():
                         divs = detail_soup.find_all('div')
                         for div in divs:
                             text = div.get_text(strip=True)
-                            if text and len(text) > 500:
+                            if text and len(text) > 100:
                                 content_div = div
                                 break
 

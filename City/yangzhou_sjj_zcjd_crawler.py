@@ -52,6 +52,8 @@ def _extract_content(article_url, metrics):
             ".bt-content",
             ".article-content",
             ".TRS_Editor",
+            ".con-page-box",
+            ".content",
         ]:
             elem = soup.select_one(sel)
             if elem:
