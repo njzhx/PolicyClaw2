@@ -138,6 +138,7 @@ jobs:
         run: mkdir -p results
 
       - name: 执行爬虫并监控资源
+        id: crawler
         shell: bash
         run: |
           set +e
@@ -236,19 +237,31 @@ jobs:
           FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
           POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ inputs.enable_supabase_write && '1' || '0' }}
           POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}
-          POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ inputs.enable_feishu_notify && '1' || '0' }}
+          POLICYCLAW_ENABLE_FEISHU_NOTIFY: '0'
           POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
           POLICYCLAW_ENABLE_RUN_RECORDS: '1'
           POLICYCLAW_RUNNER_TYPE: ${{ runner.environment == 'github-hosted' && 'remote' || 'local' }}
           POLICYCLAW_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 上传运行结果
+        id: upload_results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: crawler-results-${{ github.run_number }}
           path: results/
           retention-days: 30
+
+      - name: 发送飞书工作流摘要
+        if: ${{ always() && inputs.enable_feishu_notify }}
+        continue-on-error: true
+        run: >-
+          python feishu_notifier.py
+          --summary-file results/feishu_summary.json
+          --workflow-status "${{ steps.crawler.outcome == 'success' && steps.upload_results.outcome == 'success' && 'success' || 'failure' }}"
+        env:
+          FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
+          POLICYCLAW_ENABLE_FEISHU_NOTIFY: '1'
 
       - name: 输出执行结果
         if: always()

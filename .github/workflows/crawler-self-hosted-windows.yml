@@ -92,7 +92,7 @@ jobs:
       FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
       POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_supabase_write && '1' || '0') }}
       POLICYCLAW_ENABLE_API_PUSH: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_api_push && '1' || '0') }}
-      POLICYCLAW_ENABLE_FEISHU_NOTIFY: ${{ github.event_name == 'schedule' && '1' || (inputs.enable_feishu_notify && '1' || '0') }}
+      POLICYCLAW_ENABLE_FEISHU_NOTIFY: '0'
       POLICYCLAW_VERBOSE_CRAWLER_LOG: ${{ inputs.verbose_crawler_log && '1' || '0' }}
       POLICYCLAW_RUNNER_TYPE: local
 
@@ -266,6 +266,7 @@ jobs:
           exit $process.ExitCode
 
       - name: 上传运行结果
+        id: upload_results
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -273,6 +274,17 @@ jobs:
           path: results/
           retention-days: 30
           if-no-files-found: warn
+
+      - name: 发送飞书工作流摘要
+        if: ${{ always() && (github.event_name == 'schedule' || inputs.enable_feishu_notify) }}
+        continue-on-error: true
+        run: >-
+          & $env:POLICYCLAW_PYTHON feishu_notifier.py
+          --summary-file results/feishu_summary.json
+          --workflow-status "${{ ((steps.crawler.outcome == 'success') || (steps.crawler.outcome == 'skipped' && env.POLICYCLAW_SKIP_CRAWL == '1')) && steps.upload_results.outcome == 'success' && 'success' || 'failure' }}"
+        env:
+          FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
+          POLICYCLAW_ENABLE_FEISHU_NOTIFY: '1'
 
       - name: 输出执行结果
         if: always()

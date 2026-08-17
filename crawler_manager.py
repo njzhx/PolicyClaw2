@@ -22,9 +22,10 @@ from db_utils import (
 
 # 导入飞书通知模块
 try:
-    from feishu_notifier import send_crawler_result
+    from feishu_notifier import send_crawler_result, write_crawler_summary
 except ImportError:
     send_crawler_result = None
+    write_crawler_summary = None
 
 
 class DualOutput:
@@ -571,6 +572,18 @@ class CrawlerManager:
         sys.stderr = original_stderr
 
         self.write_failure_manifest(crawl_date_from, crawl_date_to)
+
+        if write_crawler_summary:
+            summary_path = Path(
+                os.getenv(
+                    "POLICYCLAW_FEISHU_SUMMARY_FILE",
+                    "results/feishu_summary.json",
+                )
+            )
+            write_crawler_summary(
+                self.results, start_datetime, end_datetime, summary_path
+            )
+            print(f"[FEISHU] 工作流摘要已写入: {summary_path}")
 
         # 输出API推送结果
         print("\n[API] API推送结果:")
