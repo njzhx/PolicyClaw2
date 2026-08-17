@@ -241,29 +241,12 @@ jobs:
         run: |
           $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
           $outputFile = Join-Path 'results' "crawler_output_$timestamp.md"
-          $errorFile = Join-Path 'results' "crawler_error_$timestamp.log"
 
-          $processArgs = @{
-            FilePath = $env:POLICYCLAW_PYTHON
-            ArgumentList = @('-u', 'crawler_manager.py')
-            RedirectStandardOutput = $outputFile
-            RedirectStandardError = $errorFile
-            NoNewWindow = $true
-            PassThru = $true
-            Wait = $true
-          }
-          $process = Start-Process @processArgs
+          & $env:POLICYCLAW_PYTHON -u crawler_manager.py 2>&1 |
+            Tee-Object -FilePath $outputFile
+          $crawlerStatus = $LASTEXITCODE
 
-          if (Test-Path -LiteralPath $outputFile) {
-            Get-Content -LiteralPath $outputFile -Encoding UTF8
-          }
-          if ((Test-Path -LiteralPath $errorFile) -and
-              (Get-Item -LiteralPath $errorFile).Length -gt 0) {
-            Write-Output "----- stderr -----"
-            Get-Content -LiteralPath $errorFile -Encoding UTF8
-          }
-
-          exit $process.ExitCode
+          exit $crawlerStatus
 
       - name: 上传运行结果
         id: upload_results
