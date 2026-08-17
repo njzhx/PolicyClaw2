@@ -94,14 +94,16 @@ def scrape_data():
     session = requests.Session()
 
     for page_index in range(1, MAX_PAGES + 1):
-        if page_index == 1:
-            page_url = TARGET_URL
-        else:
-            separator = "&" if "?" in TARGET_URL else "?"
-            page_url = f"{TARGET_URL}{separator}cpage={page_index}"
-
         try:
-            response = session.get(page_url, headers=HEADERS, timeout=30)
+            if page_index == 1:
+                response = session.get(TARGET_URL, headers=HEADERS, timeout=30)
+            else:
+                response = session.post(
+                    f"{TARGET_URL}&type=1",
+                    data={"cpage": str(page_index)},
+                    headers=HEADERS,
+                    timeout=30,
+                )
             response.raise_for_status()
             response.encoding = "utf-8"
         except Exception as exc:
@@ -114,6 +116,7 @@ def scrape_data():
             break
 
         oldest_date_on_page = None
+        page_new_count = 0
 
         for node in nodes:
             try:
@@ -130,6 +133,7 @@ def scrape_data():
                     metrics.duplicate_policy_count += 1
                     continue
                 seen_urls.add(article_url)
+                page_new_count += 1
 
                 metrics.valid_item_count += 1
                 latest_items.append({"title": title, "pub_at": pub_at})
@@ -156,6 +160,11 @@ def scrape_data():
                 metrics.invalid_item_count += 1
                 metrics.errors.append(f"列表记录解析失败: {exc}")
 
+        if nodes and page_new_count == 0:
+            metrics.errors.append(
+                f"列表第{page_index}页与已抓取页面重复，已停止翻页"
+            )
+            break
         if oldest_date_on_page and oldest_date_on_page < target_from:
             break
         if len(nodes) < PAGE_SIZE:

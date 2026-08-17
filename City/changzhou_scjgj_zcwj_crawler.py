@@ -65,7 +65,7 @@ def _parse_list_page(html):
             continue
         nodes.append(
             {
-                "title": link.get_text(" ", strip=True),
+                "title": (link.get("title") or link.get_text(" ", strip=True)).strip(),
                 "href": link.get("href", "").strip(),
                 "date": cells[-1].get_text(" ", strip=True),
             }
@@ -102,6 +102,7 @@ def scrape_data():
             break
 
         oldest_date_on_page = None
+        page_new_count = 0
 
         for node in nodes:
             try:
@@ -118,6 +119,7 @@ def scrape_data():
                     metrics.duplicate_policy_count += 1
                     continue
                 seen_urls.add(article_url)
+                page_new_count += 1
 
                 metrics.valid_item_count += 1
                 latest_items.append({"title": title, "pub_at": pub_at})
@@ -144,6 +146,11 @@ def scrape_data():
                 metrics.invalid_item_count += 1
                 metrics.errors.append(f"列表记录解析失败: {exc}")
 
+        if nodes and page_new_count == 0:
+            metrics.errors.append(
+                f"列表第{page_index}页与已抓取页面重复，已停止翻页"
+            )
+            break
         if oldest_date_on_page and oldest_date_on_page < target_from:
             break
         if len(nodes) < PAGE_SIZE:
