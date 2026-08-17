@@ -64,6 +64,7 @@ def scrape_data():
     page_index = 1
     max_pages = 100
     all_items = []
+    seen_urls = set()
 
     while page_index <= max_pages:
         page_url = TARGET_URL
@@ -84,7 +85,25 @@ def scrape_data():
             if not nodes:
                 break
 
-            all_items.extend(nodes)
+            new_nodes = []
+            for node in nodes:
+                link = node.select_one("a[href]")
+                href = (link.get("href") or "").strip() if link else ""
+                item_url = urljoin(page_url, href) if href else ""
+                if item_url and item_url in seen_urls:
+                    metrics.duplicate_policy_count += 1
+                    continue
+                if item_url:
+                    seen_urls.add(item_url)
+                new_nodes.append(node)
+
+            if nodes and not new_nodes:
+                metrics.errors.append(
+                    f"列表第{page_index}页与已抓取页面重复，已停止翻页"
+                )
+                break
+
+            all_items.extend(new_nodes)
 
             page_dates = []
             for node in nodes:
@@ -124,7 +143,7 @@ def scrape_data():
                 metrics.invalid_item_count += 1
                 continue
 
-            title = link.get_text(" ", strip=True)
+            title = (link.get("title") or link.get_text(" ", strip=True)).strip()
             if not title:
                 metrics.invalid_item_count += 1
                 continue

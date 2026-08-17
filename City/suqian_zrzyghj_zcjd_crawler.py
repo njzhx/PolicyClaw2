@@ -2,8 +2,8 @@
 宿迁市自然资源和规划局_政策解读爬虫
 目标页面：https://zrzy.jiangsu.gov.cn/gtapp/nrglIndex.action?classID=ff8080817d47089b017d6ac4dc050adf
 列表结构：a[href*="nrglIndex.action?type=2&messageID="] 父级包含标题和日期
-正文容器：.article-content
-分页：type=1&page=N
+正文容器：#zoom
+分页：第 1 页 GET，后续页 POST type=1 + cpage=N
 """
 import re
 from urllib.parse import urljoin
@@ -43,7 +43,7 @@ def _extract_content(session, article_url, metrics):
         response.encoding = response.apparent_encoding or "utf-8"
         soup = BeautifulSoup(response.content, "html.parser")
 
-        article = soup.select_one(".article-content")
+        article = soup.select_one("#zoom") or soup.select_one(".article-content")
         if article:
             for tag in article.find_all(["script", "style"]):
                 tag.decompose()
@@ -67,35 +67,62 @@ def scrape_data():
     page_index = 1
     max_pages = 100
     all_items = []
+    seen_hrefs = set()
 
     while page_index <= max_pages:
-        page_url = f"{TARGET_URL}&type=1&page={page_index}"
-
         try:
-            response = session.get(page_url, headers=HEADERS, timeout=30, proxies=PROXIES)
+            if page_index == 1:
+                response = session.get(
+                    TARGET_URL, headers=HEADERS, timeout=30, proxies=PROXIES
+                )
+            else:
+                response = session.post(
+                    f"{TARGET_URL}&type=1",
+                    data={"cpage": str(page_index)},
+                    headers=HEADERS,
+                    timeout=30,
+                    proxies=PROXIES,
+                )
             if response.status_code == 404:
                 break
             response.raise_for_status()
             response.encoding = response.apparent_encoding or "utf-8"
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # 政策解读列表在 a[href*="type=2&messageID="] 中
-            article_links = soup.select('a[href*="type=2&messageID="]')
+            cells = soup.select("td.nlist")
+            article_links = [
+                link
+                for cell in cells
+                if (link := cell.select_one('a[href*="type=2&messageID="]'))
+            ]
+            metrics.raw_item_count += len(cells)
 
             if not article_links:
                 break
 
-            # 对每页去重（可能有重复）
-            seen_hrefs = set()
+            new_links = []
             for a in article_links:
                 href = a.get("href", "").strip()
-                if href and href not in seen_hrefs:
-                    seen_hrefs.add(href)
-                    all_items.append(a)
+                if not href:
+                    metrics.invalid_item_count += 1
+                    continue
+                if href in seen_hrefs:
+                    metrics.duplicate_policy_count += 1
+                    continue
+                seen_hrefs.add(href)
+                new_links.append(a)
+
+            if article_links and not new_links:
+                metrics.errors.append(
+                    f"列表第{page_index}页与已抓取页面重复，已停止翻页"
+                )
+                break
+
+            all_items.extend(new_links)
 
             # 检查最旧日期
             page_dates = []
-            for a in article_links:
+            for a in new_links:
                 parent = a.parent
                 if parent:
                     text = parent.get_text(" ", strip=True)
@@ -110,7 +137,7 @@ def scrape_data():
                 if oldest < target_from:
                     break
 
-            if len(seen_hrefs) < 3:
+            if len(new_links) < 3:
                 break
 
         except Exception as exc:
@@ -118,8 +145,6 @@ def scrape_data():
             break
 
         page_index += 1
-
-    metrics.raw_item_count = len(all_items)
 
     for a in all_items:
         try:
@@ -133,7 +158,7 @@ def scrape_data():
                 metrics.invalid_item_count += 1
                 continue
 
-            title = a.get_text(" ", strip=True)
+            title = (a.get("title") or a.get_text(" ", strip=True)).strip()
             if not title:
                 metrics.invalid_item_count += 1
                 continue
