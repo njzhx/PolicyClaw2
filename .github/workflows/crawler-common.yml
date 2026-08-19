@@ -63,7 +63,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
