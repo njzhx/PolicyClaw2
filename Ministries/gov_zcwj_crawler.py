@@ -19,7 +19,6 @@ headers = {
 TARGET_URL = "https://sousuo.www.gov.cn/zcwjk/policyDocumentLibrary?q=&t=zhengcelibrary&orpro="
 
 API_URL = "https://sousuo.www.gov.cn/search-gov/data"
-API_COOKIES = "_qimei_uuid42=19b0c0b313910000a4cf89a20e72d2bc27b92965c2; _qimei_i_3=7be76886c45e58d8c7c4af61528177e3f3efa4a7100d558ae7dc7e5e2f90226b356663943c89e2bd8084; _qimei_h38=aea3debfa4cf89a20e72d2bc02000000819b0c; wdcid=0c788098375b7e28; __auc=053a196d19bd558a9d02fc6b252; _qimei_i_1=7fcd64d3c00b538f94c5a8615fd725e8febfa6f1475c01d6b6dd7b582493206c6163379d3980b0dc85b7f3e4; _qimei_fingerprint=933d898aca3f979f69c8525dc88033dd; arialoadData=false; ariauseGraymode=false"
 
 CATEGORY_MAP = {
     'gongwen': '国务院文件',
@@ -38,12 +37,8 @@ def get_api_session():
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     }
 
-    session.get(TARGET_URL, headers=main_headers, timeout=30)
-
-    for cookie in API_COOKIES.split('; '):
-        if '=' in cookie:
-            name, value = cookie.split('=', 1)
-            session.cookies.set(name.strip(), value.strip())
+    response = session.get(TARGET_URL, headers=main_headers, timeout=30)
+    response.raise_for_status()
 
     return session
 
