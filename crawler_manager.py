@@ -26,7 +26,7 @@ from db_utils import (
 )
 
 
-DEFAULT_CRAWLER_TIMEOUT_SECONDS = 300.0
+DEFAULT_CRAWLER_TIMEOUT_SECONDS = 150.0
 
 
 def _crawler_process_worker(module_name, function_name, result_path, timeout_seconds):

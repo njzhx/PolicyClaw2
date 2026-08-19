@@ -71,7 +71,7 @@ permissions:
 jobs:
   crawl:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 120
+    timeout-minutes: 180
     defaults:
       run:
         shell: pwsh
