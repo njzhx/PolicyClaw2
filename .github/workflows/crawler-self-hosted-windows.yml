@@ -2,7 +2,7 @@ name: 政策爬虫（Windows Self-hosted）
 
 on:
   schedule:
-    - cron: '15 21 * * *'
+    - cron: '30 21 * * *'
   workflow_dispatch:
     inputs:
       crawl_mode:
