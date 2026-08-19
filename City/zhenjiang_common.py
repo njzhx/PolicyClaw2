@@ -134,12 +134,16 @@ def _parse_list_items(soup, list_url):
 
 def scrape_channel(session, channel_url, target_from, target_to, metrics,
                    policies, latest_items, seen_urls):
-    """抓取单个栏目列表（含分页），把目标日期数据追加到 policies。"""
+    """抓取单个栏目列表（含分页），把目标日期数据追加到 policies。
+
+    返回列表首页是否请求成功。首页失败说明同站点后续栏目大概率
+    同样不可达，调用方应停止后续栏目，避免逐栏目耗完请求重试链。
+    """
     try:
         first_html = fetch_text(session, channel_url, timeout=LIST_TIMEOUT)
     except Exception as exc:
         metrics.errors.append(f"列表页抓取失败: {channel_url} - {exc}")
-        return
+        return False
 
     first_soup = BeautifulSoup(first_html, "html.parser")
     page_match = CREATE_PAGE_RE.search(first_html)
@@ -149,6 +153,7 @@ def scrape_channel(session, channel_url, target_from, target_to, metrics,
     total_pages = min(total_pages, MAX_PAGES)
 
     page_index = 1
+    consecutive_empty_pages = 0
     while page_index <= total_pages:
         if page_index == 1:
             soup = first_soup
@@ -164,6 +169,21 @@ def scrape_channel(session, channel_url, target_from, target_to, metrics,
 
         records, oldest_date = _parse_list_items(soup, page_url)
         metrics.raw_item_count += len(records)
+
+        # 空页止损：首页无记录说明栏目页结构失效，无需翻页；
+        # 后续页连续空页同理，避免失控翻满 MAX_PAGES。
+        if not records:
+            consecutive_empty_pages += 1
+            if page_index == 1:
+                metrics.errors.append(f"列表页未解析到记录，停止翻页: {page_url}")
+                break
+            if consecutive_empty_pages >= 2:
+                metrics.errors.append(
+                    f"连续 {consecutive_empty_pages} 页未解析到记录，停止翻页: {page_url}"
+                )
+                break
+        else:
+            consecutive_empty_pages = 0
 
         for record in records:
             if record["url"] in seen_urls:
@@ -195,6 +215,8 @@ def scrape_channel(session, channel_url, target_from, target_to, metrics,
             break
         page_index += 1
 
+    return True
+
 
 def scrape_channels(source_name, channel_urls, category="镇江"):
     """抓取一个或多个栏目并汇总，返回 (policies, latest_items, metrics)。"""
@@ -206,7 +228,7 @@ def scrape_channels(source_name, channel_urls, category="镇江"):
     seen_urls = set()
 
     for channel_url in channel_urls:
-        scrape_channel(
+        list_ok = scrape_channel(
             session,
             channel_url,
             target_from,
@@ -216,6 +238,11 @@ def scrape_channels(source_name, channel_urls, category="镇江"):
             latest_items,
             seen_urls,
         )
+        if not list_ok:
+            metrics.errors.append(
+                f"列表页请求失败，跳过后续同站栏目（起于: {channel_url}）"
+            )
+            break
 
     for item in policies:
         item["source"] = source_name

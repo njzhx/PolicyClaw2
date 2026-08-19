@@ -118,6 +118,7 @@ def scrape_data():
     total_pages = min(int(total_match.group(1)), MAX_PAGES) if total_match else 1
 
     page_index = 1
+    consecutive_empty_pages = 0
     while page_index <= total_pages:
         try:
             if page_index == 1:
@@ -137,6 +138,22 @@ def scrape_data():
         soup = BeautifulSoup(html, "html.parser")
         records, oldest_date = _parse_list_page(soup)
         metrics.raw_item_count += len(records)
+
+        # 空页止损：首页无记录说明栏目页结构失效，无需翻页；
+        # 后续页连续空页同理，避免失控翻满 MAX_PAGES。
+        if not records:
+            consecutive_empty_pages += 1
+            if page_index == 1:
+                metrics.errors.append(f"列表页未解析到记录，停止翻页: {LIST_URL}")
+                break
+            if consecutive_empty_pages >= 2:
+                metrics.errors.append(
+                    f"连续 {consecutive_empty_pages} 页未解析到记录，停止翻页 "
+                    f"[第{page_index}页]"
+                )
+                break
+        else:
+            consecutive_empty_pages = 0
 
         for record in records:
             if record["url"] in seen_urls:
