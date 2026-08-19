@@ -71,7 +71,7 @@ permissions:
 jobs:
   crawl:
     runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 180
+    timeout-minutes: 240
     defaults:
       run:
         shell: pwsh
@@ -242,8 +242,26 @@ jobs:
           $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
           $outputFile = Join-Path 'results' "crawler_output_$timestamp.md"
 
+          $runnerIpIpip = ((& curl.exe -s --max-time 15 'https://myip.ipip.net' 2>$null | Out-String).Trim())
+          if ([string]::IsNullOrWhiteSpace($runnerIpIpip)) { $runnerIpIpip = '探测失败' }
+          $runnerIpIfconfig = ((& curl.exe -s --max-time 15 'https://ifconfig.me' 2>$null | Out-String).Trim())
+          if ([string]::IsNullOrWhiteSpace($runnerIpIfconfig)) { $runnerIpIfconfig = '探测失败' }
+
+          @(
+            '## Runner 网络信息'
+            ''
+            "- 探测时间: $(Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')"
+            "- Runner 名称: $env:RUNNER_NAME"
+            "- Runner 环境: $env:RUNNER_ENVIRONMENT"
+            "- 出口 IP (myip.ipip.net): $runnerIpIpip"
+            "- 出口 IP (ifconfig.me): $runnerIpIfconfig"
+            ''
+            '---'
+            ''
+          ) | Out-File -FilePath $outputFile -Encoding utf8
+
           & $env:POLICYCLAW_PYTHON -u crawler_manager.py 2>&1 |
-            Tee-Object -FilePath $outputFile
+            Tee-Object -FilePath $outputFile -Append
           $crawlerStatus = $LASTEXITCODE
 
           exit $crawlerStatus

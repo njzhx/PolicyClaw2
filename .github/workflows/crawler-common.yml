@@ -63,7 +63,7 @@ on:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -148,6 +148,22 @@ jobs:
           resource_file="results/resource_usage_${timestamp}.csv"
           process_file="results/resource_processes_${timestamp}.log"
 
+          runner_ip_ipip=$(curl -s --max-time 15 https://myip.ipip.net || true)
+          runner_ip_ifconfig=$(curl -s --max-time 15 https://ifconfig.me || true)
+
+          {
+            echo "## Runner 网络信息"
+            echo ""
+            echo "- 探测时间: $(date --iso-8601=seconds)"
+            echo "- Runner 名称: ${RUNNER_NAME:-未知}"
+            echo "- Runner 环境: ${RUNNER_ENVIRONMENT:-未知}"
+            echo "- 出口 IP (myip.ipip.net): ${runner_ip_ipip:-探测失败}"
+            echo "- 出口 IP (ifconfig.me): ${runner_ip_ifconfig:-探测失败}"
+            echo ""
+            echo "---"
+            echo ""
+          } > "$output_file"
+
           cpu_count=$(nproc)
           memory_total_mb=$(awk '/^MemTotal:/ {printf "%.0f", $2 / 1024}' /proc/meminfo)
           disk_total_mb=$(df -Pm / | awk 'NR == 2 {print $2}')
@@ -158,7 +174,7 @@ jobs:
 
           (
             set -o pipefail
-            python -u crawler_manager.py 2>&1 | tee "$output_file"
+            python -u crawler_manager.py 2>&1 | tee -a "$output_file"
           ) &
           crawler_pid=$!
 
@@ -211,6 +227,14 @@ jobs:
           peak_disk_mb=$(awk -F, 'NR > 1 && $5 + 0 > max {max=$5} END {printf "%.0f", max+0}' "$resource_file")
 
           {
+            echo "## Runner 网络信息"
+            echo ""
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| Runner 名称 | ${RUNNER_NAME:-未知} |"
+            echo "| 出口 IP (myip.ipip.net) | ${runner_ip_ipip:-探测失败} |"
+            echo "| 出口 IP (ifconfig.me) | ${runner_ip_ifconfig:-探测失败} |"
+            echo ""
             echo "## 爬虫资源占用"
             echo ""
             echo "| 指标 | 数值 |"
