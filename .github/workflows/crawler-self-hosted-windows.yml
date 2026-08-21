@@ -83,7 +83,7 @@ jobs:
       CRAWL_DATE: ${{ inputs.crawl_date || '' }}
       CRAWL_DATE_FROM: ${{ inputs.crawl_date_from || '' }}
       CRAWL_DATE_TO: ${{ inputs.crawl_date_to || '' }}
-      CRAWL_WINDOW_DAYS: ${{ inputs.crawl_window_days || '7' }}
+      CRAWL_WINDOW_DAYS: ${{ (inputs.crawl_mode == 'sliding_window' && inputs.crawl_window_days) || (github.event_name == 'schedule' && '7') || '' }}
       POLICYCLAW_CRAWLER_FILES: ${{ inputs.crawler_files || '' }}
       SUPABASE_PROJECT_URL: ${{ secrets.SUPABASE_PROJECT_URL }}
       SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
