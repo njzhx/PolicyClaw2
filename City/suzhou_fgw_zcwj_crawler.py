@@ -66,7 +66,7 @@ def scrape_data():
                 response = session.get(page_url, headers=HEADERS, timeout=30)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.content, "html.parser")
-                nodes = soup.select(".pageList.infoList.listContent > li")
+                nodes = soup.select(".infolist li")
             except Exception as exc:
                 metrics.errors.append(f"列表页抓取失败 (page={page_index}): {exc}")
                 break
@@ -78,10 +78,10 @@ def scrape_data():
 
             for node in nodes:
                 try:
-                    link = node.select_one("h4 > a")
+                    link = node.select_one("a")
                     title = link.get_text(strip=True) if link else ""
                     href = (link.get("href") or "").strip() if link else ""
-                    date_elem = node.select_one("h4 > span.time")
+                    date_elem = node.select_one("span.time")
                     raw_date = date_elem.get_text(strip=True) if date_elem else ""
                     pub_at = parse_date(raw_date)
 

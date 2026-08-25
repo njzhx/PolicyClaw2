@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from crawler_core import format_date_window, get_crawl_date_window, is_target_date
 import re
+import time
 import asyncio
 from urllib.parse import urljoin
 
@@ -115,7 +116,6 @@ def scrape_article_with_selenium(url):
     if not SELENIUM_AVAILABLE:
         return ""
 
-    import time
     options = Options()
     options.add_argument('--headless=new')
     options.add_argument('--no-sandbox')
