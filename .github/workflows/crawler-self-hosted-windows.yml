@@ -39,6 +39,11 @@ on:
         required: false
         default: ''
         type: string
+      use_hosted_failure_manifest:
+        description: '使用最近一次 GitHub-hosted 定时成功运行的失败爬虫清单（将覆盖日期和爬虫文件输入）'
+        required: false
+        default: false
+        type: boolean
       enable_supabase_write:
         description: '是否写入 Supabase'
         required: false
@@ -103,7 +108,7 @@ jobs:
           clean: true
 
       - name: Find latest hosted crawler run
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || inputs.use_hosted_failure_manifest
         id: hosted-run
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,17 +118,12 @@ jobs:
             Accept = 'application/vnd.github+json'
             'X-GitHub-Api-Version' = '2022-11-28'
           }
-          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/crawler.yml/runs?branch=main&event=schedule&status=completed&per_page=10"
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/crawler.yml/runs?branch=main&event=schedule&status=success&per_page=1"
           $response = Invoke-RestMethod -Uri $uri -Headers $headers
           $run = $response.workflow_runs | Select-Object -First 1
           if (-not $run) {
             "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            Write-Warning 'No completed hosted crawler run found within the query result; scheduled self-hosted run will execute all crawlers.'
-            exit 0
-          }
-          if ([DateTimeOffset]::UtcNow - [DateTimeOffset]$run.updated_at -gt [TimeSpan]::FromHours(12)) {
-            "found=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            Write-Warning "Latest hosted crawler run is older than 12 hours; scheduled self-hosted run will execute all crawlers: $($run.html_url)"
+            Write-Warning 'No successful scheduled GitHub-hosted crawler run was found; self-hosted retry will be skipped.'
             exit 0
           }
           "found=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -132,7 +132,7 @@ jobs:
           Write-Output "Hosted run: $($run.html_url) (conclusion=$($run.conclusion))"
 
       - name: Download hosted failure manifest
-        if: github.event_name == 'schedule' && steps.hosted-run.outputs.found == 'true'
+        if: (github.event_name == 'schedule' || inputs.use_hosted_failure_manifest) && steps.hosted-run.outputs.found == 'true'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
@@ -143,34 +143,43 @@ jobs:
           run-id: ${{ steps.hosted-run.outputs.run_id }}
 
       - name: Prepare hosted retry selection
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || inputs.use_hosted_failure_manifest
         run: |
           $manifestPath = Join-Path 'hosted-results' 'failed_crawlers.json'
+          "POLICYCLAW_CRAWLER_FILES=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "POLICYCLAW_SKIP_CRAWL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
           if (-not (Test-Path -LiteralPath $manifestPath)) {
-            "POLICYCLAW_CRAWLER_FILES=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            "POLICYCLAW_SKIP_CRAWL=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
             if ('${{ steps.hosted-run.outputs.found }}' -eq 'true') {
-              Write-Warning "Hosted failure manifest is unavailable; scheduled self-hosted run will execute all crawlers: $manifestPath"
+              Write-Warning "Hosted failure manifest is unavailable; scheduled self-hosted retry will be skipped: $manifestPath"
             } else {
-              Write-Output 'No hosted run was found within 12 hours; scheduled self-hosted run will execute all crawlers.'
+              Write-Output 'No successful scheduled GitHub-hosted run was found; self-hosted retry will be skipped.'
             }
             exit 0
           }
-          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 |
-            ConvertFrom-Json
+
+          try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 |
+              ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            Write-Warning "Hosted failure manifest is invalid; scheduled self-hosted retry will be skipped: $($_.Exception.Message)"
+            exit 0
+          }
+
           $crawlerFiles = @($manifest.crawler_files | Where-Object { $_ })
+          if ($crawlerFiles.Count -eq 0) {
+            Write-Output 'Hosted run reported no failed crawler files; retry will be skipped.'
+            exit 0
+          }
+
           "CRAWL_MODE=date_range" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CRAWL_DATE=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CRAWL_DATE_FROM=$($manifest.date_from)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CRAWL_DATE_TO=$($manifest.date_to)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "CRAWL_WINDOW_DAYS=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "POLICYCLAW_CRAWLER_FILES=$($crawlerFiles -join ',')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          if ($crawlerFiles.Count -eq 0) {
-            "POLICYCLAW_SKIP_CRAWL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            Write-Output 'Hosted run reported no failed crawler lists; retry will be skipped.'
-          } else {
-            Write-Output "Retry crawler files ($($crawlerFiles.Count)): $($crawlerFiles -join ', ')"
-          }
+          "POLICYCLAW_SKIP_CRAWL=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Output "Retry crawler files ($($crawlerFiles.Count)): $($crawlerFiles -join ', ')"
 
       - name: 创建结果目录
         run: New-Item -ItemType Directory -Force -Path results | Out-Null
