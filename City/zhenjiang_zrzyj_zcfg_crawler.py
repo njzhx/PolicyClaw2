@@ -81,7 +81,7 @@ def _parse_list_page(soup):
         link = node.find("a")
         if not link:
             continue
-        title = (link.get("title") or link.get_text(" ", strip=True) or "").strip()
+        title = (link.get_text(" ", strip=True) or link.get("title") or "").strip()
         href = (link.get("href") or "").strip()
         date_node = node.find("span")
         pub_at = parse_date(date_node.get_text(strip=True)) if date_node else None

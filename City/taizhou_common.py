@@ -199,7 +199,7 @@ def _parse_li_clearfix(lis, base_url, metrics):
                 continue
             article_url = urljoin(base_url, href)
 
-        title = (link.get("title") or "").strip() or link.get_text(" ", strip=True)
+        title = link.get_text(" ", strip=True) or (link.get("title") or "").strip()
         date_match = DATE_RE.search(li_text)
         pub_at = parse_date(date_match.group(0)) if date_match else None
         if not title or not pub_at:
@@ -234,7 +234,7 @@ def _parse_jpaas_li(html_fragment, base_url, metrics):
         if not href.startswith(("http://", "https://")) and not ART_HREF_RE.search(href):
             metrics.invalid_item_count += 1
             continue
-        title = (link.get("title") or "").strip() or link.get_text(" ", strip=True)
+        title = link.get_text(" ", strip=True) or (link.get("title") or "").strip()
         date_span = li.select_one("span.bt-right") or li.select_one("span")
         date_text = date_span.get_text(strip=True) if date_span else ""
         date_match = DATE_RE.search(date_text or li.get_text(" ", strip=True))
@@ -403,9 +403,9 @@ def scrape_gtapp_site(list_url, source_name, category):
         for container in containers:
             link = container.select_one("a[href]")
             href = (link.get("href") or "").strip() if link else ""
-            title = (link.get("title") or "").strip() if link else ""
+            title = link.get_text(" ", strip=True) if link else ""
             if not title and link:
-                title = link.get_text(" ", strip=True)
+                title = (link.get("title") or "").strip()
             date_match = DATE_RE.search(container.get_text(" ", strip=True))
             pub_at = parse_date(date_match.group(0)) if date_match else None
             if not title or not href or not pub_at:
@@ -466,9 +466,9 @@ def scrape_chinatax_column(list_url, source_name, category):
             metrics.raw_item_count += 1
             link = li.select_one("a[href]")
             href = (link.get("href") or "").strip() if link else ""
-            title = (link.get("title") or "").strip() if link else ""
+            title = link.get_text(" ", strip=True) if link else ""
             if not title and link:
-                title = link.get_text(" ", strip=True)
+                title = (link.get("title") or "").strip()
             date_match = DATE_RE.search(li.get_text(" ", strip=True))
             pub_at = parse_date(date_match.group(0)) if date_match else None
             if not title or not href or not pub_at:

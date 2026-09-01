@@ -112,7 +112,7 @@ def _parse_list_items(soup, list_url):
         link = node.find("a")
         if not link:
             continue
-        title = (link.get("title") or link.get_text(" ", strip=True) or "").strip()
+        title = (link.get_text(" ", strip=True) or link.get("title") or "").strip()
         href = (link.get("href") or "").strip()
         if not title or not href:
             continue
