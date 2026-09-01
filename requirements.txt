@@ -7,3 +7,4 @@ webdriver-manager
 dnspython
 pdfplumber
 pypdf
+crawl4ai
