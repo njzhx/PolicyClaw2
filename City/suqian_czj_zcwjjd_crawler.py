@@ -1,4 +1,4 @@
-"""
+﻿"""
 宿迁市财政局_政策文件及解读爬虫
 目标页面：https://sqcz.suqian.gov.cn/sczj/zcfg/xxgk_list.shtml
 列表结构：ul.listContent > li
@@ -143,7 +143,7 @@ def scrape_data():
                 metrics.invalid_item_count += 1
                 continue
 
-            title = (link.get("title") or link.get_text(" ", strip=True)).strip()
+            title = (link.get_text(" ", strip=True) or link.get("title")).strip()
             if not title:
                 metrics.invalid_item_count += 1
                 continue

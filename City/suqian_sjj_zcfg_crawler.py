@@ -1,4 +1,4 @@
-"""
+﻿"""
 宿迁市审计局_政策文件及解读爬虫
 目标栏目：http://sjj.suqian.gov.cn/ssjj/zcfg/xxgk_list.shtml
 列表结构：ul.listContent > li，每页16条，共8页约121条记录
@@ -514,7 +514,7 @@ def scrape_data():
                         continue
 
                     list_title = _clean_title(
-                        link.get("title") or link.get_text(" ", strip=True)
+                        link.get_text(" ", strip=True) or link.get("title")
                     )
                     if not list_title or not href:
                         metrics.invalid_item_count += 1

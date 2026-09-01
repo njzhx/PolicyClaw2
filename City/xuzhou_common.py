@@ -307,9 +307,9 @@ def scrape_zrzy_site(list_url, source_name, category, metrics=None):
                 metrics.invalid_item_count += 1
                 continue
             href = (link.get("href") or "").strip()
-            title = (link.get("title") or "").strip() or link.get_text(
+            title = link.get_text(
                 " ", strip=True
-            )
+            ) or (link.get("title") or "").strip()
             date_match = DATE_RE.search(container.get_text(" ", strip=True))
             pub_at = parse_date(date_match.group(0)) if date_match else None
 

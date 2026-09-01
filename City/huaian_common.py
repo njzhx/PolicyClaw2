@@ -145,7 +145,7 @@ def _parse_list_items(soup, base_url, metrics, containers, seen_urls):
             metrics.invalid_item_count += 1
             continue
 
-        title = (link.get("title") or "").strip() or link.get_text(" ", strip=True)
+        title = link.get_text(" ", strip=True) or (link.get("title") or "").strip()
         date_match = DATE_RE.search(container.get_text(" ", strip=True))
         pub_at = parse_date(date_match.group(0)) if date_match else None
 

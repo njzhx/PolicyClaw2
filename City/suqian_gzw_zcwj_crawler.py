@@ -1,4 +1,4 @@
-"""
+﻿"""
 宿迁市国有资产监督管理委员会_政策文件爬虫
 目标栏目：https://sqgzw.suqian.gov.cn/gzw/zcwj/xxgk_list.shtml
 列表结构：ul.listContent > li，无分页（16条）
@@ -514,7 +514,7 @@ def scrape_data():
                         continue
 
                     list_title = _clean_title(
-                        link.get("title") or link.get_text(" ", strip=True)
+                        link.get_text(" ", strip=True) or link.get("title")
                     )
                     if not list_title or not href:
                         metrics.invalid_item_count += 1

@@ -111,9 +111,9 @@ def _parse_list_page(html):
         href = link.get("href", "").strip()
         if not href or href.startswith("javascript"):
             continue
-        title = (link.get("title") or "").strip()
+        title = link.get_text(" ", strip=True).lstrip("·").strip()
         if not title:
-            title = link.get_text(" ", strip=True).lstrip("·").strip()
+            title = (link.get("title") or "").strip()
         nodes.append({"title": title, "href": href, "date": raw_date.strip("[]")})
     return nodes
 

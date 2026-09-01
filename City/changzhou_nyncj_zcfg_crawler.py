@@ -1,4 +1,4 @@
-"""常州市农业农村局_政策法规 爬虫。
+﻿"""常州市农业农村局_政策法规 爬虫。
 
 站点：常州市农业农村局 政策法规（政府信息公开 box3 列表）
 列表为服务端渲染表格，按发布日期倒序，支持路径/参数分页。
@@ -65,7 +65,7 @@ def _parse_list_page(html):
             continue
         nodes.append(
             {
-                "title": (link.get("title") or link.get_text(" ", strip=True)).strip(),
+                "title": (link.get_text(" ", strip=True) or link.get("title")).strip(),
                 "href": link.get("href", "").strip(),
                 "date": cells[-1].get_text(" ", strip=True),
             }

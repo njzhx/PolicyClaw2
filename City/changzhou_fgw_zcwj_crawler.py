@@ -65,7 +65,7 @@ def _parse_list_page(html):
             continue
         nodes.append(
             {
-                "title": (link.get("title") or link.get_text(" ", strip=True)).strip(),
+                "title": (link.get_text(" ", strip=True) or link.get("title")).strip(),
                 "href": link.get("href", "").strip(),
                 "date": cells[-1].get_text(" ", strip=True),
             }
