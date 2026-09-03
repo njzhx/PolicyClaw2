@@ -11,6 +11,7 @@ ENV/
 # 编辑器/系统文件
 .idea/
 .vscode/
+.playwright-mcp/
 *.swp
 *.swo
 .DS_Store
