@@ -1,3 +1,4 @@
+import concurrent.futures
 import os
 import time
 import sys
@@ -6,11 +7,14 @@ import json
 import pickle
 import random
 import tempfile
+import threading
 import traceback
 import uuid
 from datetime import datetime
 from io import StringIO
 from pathlib import Path
+from urllib.parse import urlsplit
+
 from crawler_process import run_isolated
 
 from crawler_core import (
@@ -82,22 +86,26 @@ except ImportError:
 
 
 class DualOutput:
-    """双输出流，同时输出到控制台和缓冲区"""
+    """双输出流，同时输出到控制台和缓冲区（线程安全）"""
 
     def __init__(self, original_stdout):
         self.original_stdout = original_stdout
         self.buffer = StringIO()
+        self._lock = threading.Lock()
 
     def write(self, text):
-        self.original_stdout.write(text)
-        self.buffer.write(text)
+        with self._lock:
+            self.original_stdout.write(text)
+            self.buffer.write(text)
 
     def flush(self):
-        self.original_stdout.flush()
-        self.buffer.flush()
+        with self._lock:
+            self.original_stdout.flush()
+            self.buffer.flush()
 
     def getvalue(self):
-        return self.buffer.getvalue()
+        with self._lock:
+            return self.buffer.getvalue()
 
 
 # ==========================================
@@ -134,6 +142,12 @@ class CrawlerManager:
         self.shuffle_crawlers = os.getenv(
             "POLICYCLAW_SHUFFLE_CRAWLERS", "1"
         ).strip().lower() not in {"0", "false", "no", "off"}
+        self.max_workers = max(1, int(
+            os.getenv("POLICYCLAW_MAX_WORKERS", "8").strip() or "8"
+        ))
+        self.max_domain_concurrency = max(1, int(
+            os.getenv("POLICYCLAW_MAX_DOMAIN_CONCURRENCY", "1").strip() or "1"
+        ))
 
     @staticmethod
     def _positive_float_env(name, default):
@@ -476,7 +490,7 @@ class CrawlerManager:
         print(f"[CRAWLERS] 已注册爬虫: {len(self.crawlers)} 个")
         print(
             f"[GUARD] 单爬虫超时: {self.crawler_timeout_seconds:g} 秒；"
-            "入口间隔: 已关闭；"
+            f"并发: {self.max_workers} workers, 同域名≤{self.max_domain_concurrency}；"
             f"全局乱序: {'开启' if self.shuffle_crawlers else '关闭'}"
         )
         if self.verbose_crawler_log:
@@ -485,143 +499,191 @@ class CrawlerManager:
 
         total_start_time = time.time()
 
-        for name, crawler_func, target_url, crawler_file in self.crawlers:
-            crawler_key = os.path.splitext(crawler_file)[0]
-            start_time = time.time()
-            crawler_started_at = datetime.now().astimezone()
-            crawler_output = ""
-            self._print_crawler_header(name, target_url)
+        # ---- 域名感知并发调度 ----
+        results_lock = threading.Lock()
+        policy_keys_lock = threading.Lock()
+        domain_semaphores = {}
+        domain_sem_lock = threading.Lock()
+        completed_count = [0]  # mutable for closure access
 
-            try:
-                (
-                    result,
-                    crawler_output,
-                    captured_storage_result,
-                ) = self._run_crawler_in_subprocess(
-                    crawler_func
-                )
-
-                # 记录结果
-                execution_time = time.time() - start_time
-
-                adapted_result = adapt_legacy_result(result, crawler_output, name)
-                current_storage_result = adapted_result.get("storage_result") or {}
-                if captured_storage_result and (
-                    current_storage_result.get("status") in {None, "unknown"}
-                    or (
-                        current_storage_result.get("status") in {"success", "partial"}
-                        and current_storage_result.get("counts_verified") is not True
+        def _get_domain_semaphore(target_url):
+            domain = urlsplit(target_url or "").netloc.casefold() or "_unknown_"
+            with domain_sem_lock:
+                if domain not in domain_semaphores:
+                    domain_semaphores[domain] = threading.Semaphore(
+                        self.max_domain_concurrency
                     )
-                ):
-                    adapted_result["storage_result"] = captured_storage_result
-                data_list = adapted_result["items"]
-                metrics = adapted_result["metrics"]
-                latest_items = adapted_result.get("latest_items") or []
-                storage_result = adapted_result.get("storage_result") or {}
-                api_push_result = adapted_result.get("api_push_result")
+                return domain_semaphores[domain]
 
-                global_duplicate_count = 0
-                for item in data_list:
-                    policy_key = item.get("policy_key")
-                    if policy_key and policy_key in self.seen_policy_keys:
-                        global_duplicate_count += 1
-                    elif policy_key:
-                        self.seen_policy_keys.add(policy_key)
-                metrics["duplicate_policy_count"] = metrics.get("duplicate_policy_count", 0) + global_duplicate_count
+        def _execute_one(crawler_tuple):
+            name, crawler_func, target_url, crawler_file = crawler_tuple
+            crawler_key = os.path.splitext(crawler_file)[0]
+            sem = _get_domain_semaphore(target_url)
 
-                crawl_count = metrics.get("target_date_count", len(data_list))
-                write_count = storage_result.get("saved_count")
-                if not isinstance(write_count, int):
-                    write_count = len(data_list) - global_duplicate_count
-                filter_count = metrics.get("filtered_count", 0)
+            sem.acquire()
+            try:
+                start_time = time.time()
+                crawler_started_at = datetime.now().astimezone()
+                crawler_output = ""
+                self._print_crawler_header(name, target_url)
 
-                self.results[name] = {
-                    'status': 'success',
-                    'crawl_count': crawl_count,
-                    'write_count': write_count,
-                    'filter_count': filter_count,
-                    'latest_items': latest_items,
-                    'metrics': metrics,
-                    'execution_time': round(execution_time, 2),
-                    'timestamp': datetime.now().isoformat(),
-                    'target_url': target_url,
-                    'crawler_file': crawler_file,
-                    'storage_result': storage_result,
-                    'api_push_result': api_push_result,
-                    'raw_log_line_count': len(crawler_output.splitlines()),
-                }
+                try:
+                    (
+                        result,
+                        crawler_output,
+                        captured_storage_result,
+                    ) = self._run_crawler_in_subprocess(
+                        crawler_func
+                    )
 
-                health_status = "success" if metrics.get("raw_item_count", 0) > 0 else "error"
-                record_result = save_crawler_run({
-                    "run_id": self.run_id,
-                    "crawler_key": crawler_key,
-                    "crawler_name": name,
-                    "runner_type": self.runner_type,
-                    "status": health_status,
-                    "raw_item_count": int(metrics.get("raw_item_count", 0) or 0),
-                    "target_date_count": int(metrics.get("target_date_count", 0) or 0),
-                    "error_message": None if health_status == "success" else "Article list is empty",
-                    "target_url": target_url or None,
-                    "started_at": crawler_started_at.isoformat(),
-                    "finished_at": datetime.now().astimezone().isoformat(),
-                    "duration_seconds": round(execution_time, 2),
-                })
-                self.results[name]["health_status"] = health_status
-                self.results[name]["run_record_result"] = record_result
+                    execution_time = time.time() - start_time
 
-                self._print_crawler_result(name, self.results[name], crawler_output)
+                    adapted_result = adapt_legacy_result(result, crawler_output, name)
+                    current_storage_result = adapted_result.get("storage_result") or {}
+                    if captured_storage_result and (
+                        current_storage_result.get("status") in {None, "unknown"}
+                        or (
+                            current_storage_result.get("status") in {"success", "partial"}
+                            and current_storage_result.get("counts_verified") is not True
+                        )
+                    ):
+                        adapted_result["storage_result"] = captured_storage_result
+                    data_list = adapted_result["items"]
+                    metrics = adapted_result["metrics"]
+                    latest_items = adapted_result.get("latest_items") or []
+                    storage_result = adapted_result.get("storage_result") or {}
+                    api_push_result = adapted_result.get("api_push_result")
 
-            except Exception as e:
-                # 捕获异常，确保其他爬虫继续执行
-                execution_time = time.time() - start_time
-                self.results[name] = {
-                    'status': 'error',
-                    'crawl_count': 0,
-                    'write_count': 0,
-                    'error_message': str(e),
-                    'metrics': {
-                        'raw_item_count': 0,
-                        'valid_item_count': 0,
-                        'target_date_count': 0,
-                        'filtered_count': 0,
-                        'invalid_item_count': 0,
-                        'empty_content_count': 0,
-                        'duplicate_policy_count': 0,
-                        'saved_count': 0,
-                        'api_push_failed_count': 0,
-                        'errors': [str(e)],
-                    },
-                    'execution_time': round(execution_time, 2),
-                    'timestamp': datetime.now().isoformat(),
-                    'target_url': target_url,
-                    'crawler_file': crawler_file,
-                    'latest_items': [],
-                    'storage_result': {
+                    global_duplicate_count = 0
+                    with policy_keys_lock:
+                        for item in data_list:
+                            policy_key = item.get("policy_key")
+                            if policy_key and policy_key in self.seen_policy_keys:
+                                global_duplicate_count += 1
+                            elif policy_key:
+                                self.seen_policy_keys.add(policy_key)
+                    metrics["duplicate_policy_count"] = metrics.get("duplicate_policy_count", 0) + global_duplicate_count
+
+                    crawl_count = metrics.get("target_date_count", len(data_list))
+                    write_count = storage_result.get("saved_count")
+                    if not isinstance(write_count, int):
+                        write_count = len(data_list) - global_duplicate_count
+                    filter_count = metrics.get("filtered_count", 0)
+
+                    result_entry = {
+                        'status': 'success',
+                        'crawl_count': crawl_count,
+                        'write_count': write_count,
+                        'filter_count': filter_count,
+                        'latest_items': latest_items,
+                        'metrics': metrics,
+                        'execution_time': round(execution_time, 2),
+                        'timestamp': datetime.now().isoformat(),
+                        'target_url': target_url,
+                        'crawler_file': crawler_file,
+                        'storage_result': storage_result,
+                        'api_push_result': api_push_result,
+                        'raw_log_line_count': len(crawler_output.splitlines()),
+                    }
+
+                    health_status = "success" if metrics.get("raw_item_count", 0) > 0 else "error"
+                    record_result = save_crawler_run({
+                        "run_id": self.run_id,
+                        "crawler_key": crawler_key,
+                        "crawler_name": name,
+                        "runner_type": self.runner_type,
+                        "status": health_status,
+                        "raw_item_count": int(metrics.get("raw_item_count", 0) or 0),
+                        "target_date_count": int(metrics.get("target_date_count", 0) or 0),
+                        "error_message": None if health_status == "success" else "Article list is empty",
+                        "target_url": target_url or None,
+                        "started_at": crawler_started_at.isoformat(),
+                        "finished_at": datetime.now().astimezone().isoformat(),
+                        "duration_seconds": round(execution_time, 2),
+                    })
+                    result_entry["health_status"] = health_status
+                    result_entry["run_record_result"] = record_result
+
+                    with results_lock:
+                        self.results[name] = result_entry
+                    self._print_crawler_result(name, result_entry, crawler_output)
+
+                except Exception as e:
+                    execution_time = time.time() - start_time
+                    result_entry = {
                         'status': 'error',
-                        'saved_count': 0,
-                        'message': '爬虫执行失败，未写入 Supabase',
-                    },
-                    'raw_log_line_count': len(crawler_output.splitlines()),
-                }
+                        'crawl_count': 0,
+                        'write_count': 0,
+                        'error_message': str(e),
+                        'metrics': {
+                            'raw_item_count': 0,
+                            'valid_item_count': 0,
+                            'target_date_count': 0,
+                            'filtered_count': 0,
+                            'invalid_item_count': 0,
+                            'empty_content_count': 0,
+                            'duplicate_policy_count': 0,
+                            'saved_count': 0,
+                            'api_push_failed_count': 0,
+                            'errors': [str(e)],
+                        },
+                        'execution_time': round(execution_time, 2),
+                        'timestamp': datetime.now().isoformat(),
+                        'target_url': target_url,
+                        'crawler_file': crawler_file,
+                        'latest_items': [],
+                        'storage_result': {
+                            'status': 'error',
+                            'saved_count': 0,
+                            'message': '爬虫执行失败，未写入 Supabase',
+                        },
+                        'raw_log_line_count': len(crawler_output.splitlines()),
+                    }
 
-                record_result = save_crawler_run({
-                    "run_id": self.run_id,
-                    "crawler_key": crawler_key,
-                    "crawler_name": name,
-                    "runner_type": self.runner_type,
-                    "status": "error",
-                    "raw_item_count": 0,
-                    "target_date_count": 0,
-                    "error_message": str(e)[:2000],
-                    "target_url": target_url or None,
-                    "started_at": crawler_started_at.isoformat(),
-                    "finished_at": datetime.now().astimezone().isoformat(),
-                    "duration_seconds": round(execution_time, 2),
-                })
-                self.results[name]["health_status"] = "error"
-                self.results[name]["run_record_result"] = record_result
+                    record_result = save_crawler_run({
+                        "run_id": self.run_id,
+                        "crawler_key": crawler_key,
+                        "crawler_name": name,
+                        "runner_type": self.runner_type,
+                        "status": "error",
+                        "raw_item_count": 0,
+                        "target_date_count": 0,
+                        "error_message": str(e)[:2000],
+                        "target_url": target_url or None,
+                        "started_at": crawler_started_at.isoformat(),
+                        "finished_at": datetime.now().astimezone().isoformat(),
+                        "duration_seconds": round(execution_time, 2),
+                    })
+                    result_entry["health_status"] = "error"
+                    result_entry["run_record_result"] = record_result
 
-                self._print_crawler_result(name, self.results[name], crawler_output)
+                    with results_lock:
+                        self.results[name] = result_entry
+                    self._print_crawler_result(name, result_entry, crawler_output)
+            finally:
+                sem.release()
+                with results_lock:
+                    completed_count[0] += 1
+                    done = completed_count[0]
+                total = len(self.crawlers)
+                if total >= 20 and done % max(1, total // 20) == 0:
+                    elapsed = time.time() - total_start_time
+                    print(
+                        f"[PROGRESS] {done}/{total} 完成 "
+                        f"({done * 100 // total}%, 已用 {elapsed:.0f}s)"
+                    )
+
+        # 使用 ThreadPoolExecutor 调度：线程负责调度等待，
+        # 实际爬虫代码仍在子进程中运行，不受 GIL 影响
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.max_workers
+        ) as pool:
+            futures = [
+                pool.submit(_execute_one, crawler)
+                for crawler in self.crawlers
+            ]
+            # 等待所有 futures 完成（异常已在 _execute_one 内部捕获）
+            concurrent.futures.wait(futures)
 
         total_execution_time = time.time() - total_start_time
         end_datetime = datetime.now()
