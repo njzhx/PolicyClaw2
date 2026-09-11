@@ -504,7 +504,6 @@ class CrawlerManager:
         policy_keys_lock = threading.Lock()
         domain_semaphores = {}
         domain_sem_lock = threading.Lock()
-        completed_count = [0]  # mutable for closure access
 
         def _get_domain_semaphore(target_url):
             domain = urlsplit(target_url or "").netloc.casefold() or "_unknown_"
@@ -525,7 +524,6 @@ class CrawlerManager:
                 start_time = time.time()
                 crawler_started_at = datetime.now().astimezone()
                 crawler_output = ""
-                self._print_crawler_header(name, target_url)
 
                 try:
                     (
@@ -606,7 +604,7 @@ class CrawlerManager:
 
                     with results_lock:
                         self.results[name] = result_entry
-                    self._print_crawler_result(name, result_entry, crawler_output)
+                    return name, target_url, result_entry, crawler_output
 
                 except Exception as e:
                     execution_time = time.time() - start_time
@@ -659,31 +657,30 @@ class CrawlerManager:
 
                     with results_lock:
                         self.results[name] = result_entry
-                    self._print_crawler_result(name, result_entry, crawler_output)
+                    return name, target_url, result_entry, crawler_output
             finally:
                 sem.release()
-                with results_lock:
-                    completed_count[0] += 1
-                    done = completed_count[0]
-                total = len(self.crawlers)
-                if total >= 20 and done % max(1, total // 20) == 0:
-                    elapsed = time.time() - total_start_time
-                    print(
-                        f"[PROGRESS] {done}/{total} 完成 "
-                        f"({done * 100 // total}%, 已用 {elapsed:.0f}s)"
-                    )
 
-        # 使用 ThreadPoolExecutor 调度：线程负责调度等待，
-        # 实际爬虫代码仍在子进程中运行，不受 GIL 影响
+        # 使用 ThreadPoolExecutor 并发抓取，主线程严格按照注册顺序依次输出日志
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.max_workers
         ) as pool:
-            futures = [
+            ordered_futures = [
                 pool.submit(_execute_one, crawler)
                 for crawler in self.crawlers
             ]
-            # 等待所有 futures 完成（异常已在 _execute_one 内部捕获）
-            concurrent.futures.wait(futures)
+
+            total = len(self.crawlers)
+            for index, future in enumerate(ordered_futures, 1):
+                name, target_url, result_entry, crawler_output = future.result()
+                self._print_crawler_header(name, target_url)
+                self._print_crawler_result(name, result_entry, crawler_output)
+                if total >= 20 and index % max(1, total // 20) == 0:
+                    elapsed = time.time() - total_start_time
+                    print(
+                        f"[PROGRESS] {index}/{total} 完成 "
+                        f"({index * 100 // total}%, 已用 {elapsed:.0f}s)"
+                    )
 
         total_execution_time = time.time() - total_start_time
         end_datetime = datetime.now()
