@@ -75,7 +75,7 @@ def scrape_data():
                 break
 
             soup = BeautifulSoup(response.content, "html.parser")
-            nodes = soup.select("ul.item.lh.jt_dott.f14 > li")
+            nodes = soup.select("ul.infolist > li")
             if not nodes:
                 break
 
@@ -87,14 +87,9 @@ def scrape_data():
                     if not link:
                         metrics.invalid_item_count += 1
                         continue
-                    title = (link.get("title") or "").strip()
-                    if not title:
-                        hidden = link.select_one("span.gjdi")
-                        if hidden:
-                            hidden.decompose()
-                        title = link.get_text(" ", strip=True)
+                    title = link.get_text(" ", strip=True)
                     href = (link.get("href") or "").strip()
-                    date_elem = node.select_one("span.youce") or node.select_one("span")
+                    date_elem = node.select_one("span.time")
                     pub_date_str = date_elem.get_text(strip=True) if date_elem else ""
 
                     if not title or not href:

@@ -4,7 +4,6 @@ import time
 import sys
 import importlib
 import json
-import multiprocessing
 import pickle
 import random
 import tempfile
@@ -15,6 +14,8 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from crawler_process import run_isolated
 
 from crawler_core import (
     adapt_legacy_result,
@@ -175,31 +176,19 @@ class CrawlerManager:
         result_path = Path(result_handle.name)
         result_handle.close()
         try:
-            context = multiprocessing.get_context("spawn")
-            process = context.Process(
-                target=_crawler_process_worker,
-                args=(
+            exitcode = run_isolated(
+                _crawler_process_worker,
+                (
                     crawler_func.__module__,
                     crawler_func.__name__,
                     str(result_path),
                     self.crawler_timeout_seconds,
                 ),
+                timeout=self.crawler_timeout_seconds,
                 name=f"policyclaw-{crawler_func.__module__.rsplit('.', 1)[-1]}",
             )
-            process.start()
-            process.join(self.crawler_timeout_seconds)
-            if process.is_alive():
-                process.terminate()
-                process.join(10)
-                if process.is_alive() and hasattr(process, "kill"):
-                    process.kill()
-                    process.join(5)
-                raise TimeoutError(
-                    f"爬虫运行超过 {self.crawler_timeout_seconds:g} 秒，已终止"
-                )
-
-            if process.exitcode != 0 and result_path.stat().st_size == 0:
-                raise RuntimeError(f"爬虫子进程异常退出，退出码: {process.exitcode}")
+            if exitcode != 0 and result_path.stat().st_size == 0:
+                raise RuntimeError(f"爬虫子进程异常退出，退出码: {exitcode}")
             if result_path.stat().st_size == 0:
                 raise RuntimeError("爬虫子进程未返回结果")
 
@@ -845,6 +834,7 @@ def run_discovered_crawlers():
 
 if __name__ == "__main__":
     run_discovered_crawlers()
+    print("[PROCESS] 所有爬虫已结束，管理器即将退出", flush=True)
 
 
 def _legacy_manual_registration():
