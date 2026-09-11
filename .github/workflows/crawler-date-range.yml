@@ -36,6 +36,16 @@ on:
         required: false
         default: false
         type: boolean
+      max_workers:
+        description: '最大并行 worker 数量（默认 8）'
+        required: false
+        default: '8'
+        type: string
+      max_domain_concurrency:
+        description: '同一域名最大并发数量（默认 1，同域名串行）'
+        required: false
+        default: '1'
+        type: string
 
 jobs:
   crawl:
@@ -49,4 +59,6 @@ jobs:
       enable_api_push: ${{ inputs.enable_api_push }}
       enable_feishu_notify: ${{ inputs.enable_feishu_notify }}
       verbose_crawler_log: ${{ inputs.verbose_crawler_log }}
+      max_workers: ${{ inputs.max_workers || '8' }}
+      max_domain_concurrency: ${{ inputs.max_domain_concurrency || '1' }}
     secrets: inherit
