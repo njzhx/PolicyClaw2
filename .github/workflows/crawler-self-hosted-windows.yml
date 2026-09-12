@@ -209,26 +209,51 @@ jobs:
             Select-Object Caption, Version, TotalVisibleMemorySize, FreePhysicalMemory |
             Format-List
 
-      - name: 创建虚拟环境并安装依赖
+      - name: 准备持久化虚拟环境
         run: |
-          $venvPath = Join-Path $env:GITHUB_WORKSPACE '.venv'
-          $venvPython = Join-Path $venvPath 'Scripts\python.exe'
-
-          & $env:POLICYCLAW_BASE_PYTHON -m venv $venvPath
+          $pythonIdentity = & $env:POLICYCLAW_BASE_PYTHON -c "import sys, platform; print(sys.executable, sys.version, platform.machine())"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path -LiteralPath $venvPython)) {
-            throw "Virtual environment Python not found: $venvPython"
+          $requirementsHash = (Get-FileHash -LiteralPath requirements.txt -Algorithm SHA256).Hash
+          $identityBytes = [Text.Encoding]::UTF8.GetBytes("venv-v1|$pythonIdentity|$requirementsHash")
+          $cacheKey = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($identityBytes)).ToLowerInvariant()
+          if (-not $env:RUNNER_TOOL_CACHE -or -not $env:GITHUB_REPOSITORY_ID) {
+            throw 'RUNNER_TOOL_CACHE and GITHUB_REPOSITORY_ID are required.'
           }
-
-          "POLICYCLAW_PYTHON=$venvPython" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-          & $venvPython -m pip install --upgrade pip
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (Test-Path -LiteralPath requirements.txt) {
+          $cacheRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TOOL_CACHE "policyclaw-venvs/$env:GITHUB_REPOSITORY_ID"))
+          $workspaceRoot = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
+          if ($cacheRoot.Equals($workspaceRoot, [StringComparison]::OrdinalIgnoreCase) -or
+              $cacheRoot.StartsWith("$workspaceRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Persistent virtual environment must be outside the checkout directory.'
+          }
+          $venvPath = [IO.Path]::GetFullPath((Join-Path $cacheRoot $cacheKey))
+          if (-not $venvPath.StartsWith("$cacheRoot\", [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Invalid virtual environment cache path.'
+          }
+          $venvPython = Join-Path $venvPath 'Scripts\python.exe'
+          $readyFile = Join-Path $venvPath '.policyclaw-ready'
+          $reuse = $false
+          if ((Test-Path -LiteralPath $readyFile) -and (Test-Path -LiteralPath $venvPython)) {
+            & $venvPython -m pip check
+            $reuse = $LASTEXITCODE -eq 0
+          }
+          if ($reuse) {
+            Write-Output "Reusing virtual environment: $venvPath"
+          } else {
+            Write-Output "Preparing virtual environment: $venvPath"
+            # --clear repairs a previous interrupted installation at this exact cache path.
+            New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+            & $env:POLICYCLAW_BASE_PYTHON -m venv --clear $venvPath
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $venvPython -m pip install --upgrade pip
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & $venvPython -m pip install -r requirements.txt
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & $venvPython -m pip check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Set-Content -LiteralPath $readyFile -Value $cacheKey -Encoding utf8
           }
+          "POLICYCLAW_PYTHON=$venvPython" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: 校验日期运行参数
         run: |
