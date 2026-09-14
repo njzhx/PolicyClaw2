@@ -213,7 +213,8 @@ def _parse_jpaas_li(html_fragment, base_url, metrics):
     """解析 jpaas 返回的 data.html 片段中的列表条目。
 
     各站模板不一致：多数为 ``li.clearfix``，工信局通知公告等栏目
-    为 ``.page-content ul.lmy-list-ul > li``（无 class）。
+    为 ``.page-content ul.lmy-list-ul > li``（无 class），泰兴等站
+    为 ``table > tr.xxgk_nav_con`` 表格行结构。
     """
     soup = BeautifulSoup(html_fragment, "html.parser")
     lis = soup.select("li.clearfix")
@@ -223,6 +224,8 @@ def _parse_jpaas_li(html_fragment, base_url, metrics):
             for li in soup.select(".page-content li")
             if li.select_one("a[href]") and DATE_RE.search(li.get_text(" ", strip=True))
         ]
+    if not lis:
+        lis = soup.select("tr.xxgk_nav_con")
     items = []
     for li in lis:
         metrics.raw_item_count += 1
