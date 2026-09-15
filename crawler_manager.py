@@ -257,10 +257,12 @@ class CrawlerManager:
                 print(f"[REGISTER] {name}")
 
     def discover_crawlers(self):
-        """Discover every *_crawler.py module in the three crawler directories."""
+        """Discover every *_crawler.py module in the four crawler directories."""
         repository_root = Path(__file__).resolve().parent
-        for package_name in ("Ministries", "Jiangsu", "City"):
+        for package_name in ("Ministries", "Jiangsu", "City", "District"):
             package_dir = repository_root / package_name
+            if not package_dir.is_dir():
+                continue
             for crawler_path in sorted(package_dir.glob("*_crawler.py")):
                 module_name = f"{package_name}.{crawler_path.stem}"
                 try:
