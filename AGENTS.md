@@ -30,6 +30,7 @@
 - 中央、国务院、部委及国家级机构：`Ministries/`
 - 江苏省政府、省级厅局和省级机构：`Jiangsu/`
 - 江苏省内的13个地级市和市级机构：`City/`
+- 江苏省内的区县级机构：`District/`
 
 新文件使用小写 snake_case，并以 `_crawler.py` 结尾，例如：
 
@@ -37,17 +38,19 @@
 Ministries/example_zcwj_crawler.py
 Jiangsu/jiangsu_example_tzgg_crawler.py
 City/Suzhou_example_zcwj_crawler.py
+District/nanjing_xuanwu_zffw_crawler.py
 ```
 
 一个文件原则上对应一个站点栏目。如果同一站点的多个栏目共用完整抓取逻辑，可以复用内部函数；确需一个文件聚合多个栏目时，文件的 `run()` 必须一次性执行并汇总这些栏目。动态发现按文件执行一次，不会为文件内部的栏目分别创建入口。
 
-三个爬虫目录中的文件名必须全局唯一。`POLICYCLAW_CRAWLER_FILES` 使用不含目录的文件名进行筛选，重名文件会造成补跑选择歧义。
+四个爬虫目录中的文件名必须全局唯一。`POLICYCLAW_CRAWLER_FILES` 使用不含目录的文件名进行筛选，重名文件会造成补跑选择歧义。
 
 ### 2.2 category 固定值
 
 - `Ministries/` 下的爬虫：`category` 必须为 `"中央部委"`
 - `Jiangsu/` 下的爬虫：`category` 必须为 `"江苏省本级"`
-- `City/` 下的爬虫：`category` 必须为地级市名称，例如 `"南京"或者"连云港"`
+- `City/` 下的爬虫：`category` 必须为地级市名称，例如 `"南京"` 或者 `"连云港"`
+- `District/` 下的爬虫：`category` 必须为 `"城市简称_区县名"`，例如 `"南京_玄武区"`、`"南京_秦淮区"`。城市简称应与 `City/` 下对应城市的 category 值保持一致（如 `"南京"`、`"无锡"`）。
 
 不得使用空字符串、网站栏目名或自行创造的新分类。新增其他地域目录时先向项目维护者确认分类值。
 
@@ -61,6 +64,8 @@ SOURCE_NAME = "机构名称_栏目名称"
 ```
 
 `TARGET_URL` 会被 `crawler_manager.py` 用于统一输出。`SOURCE_NAME` 是动态发现后的用户可见名称，必须包含中文、稳定、可读且在所有爬虫中唯一。缺少中文 `SOURCE_NAME` 时管理器必须拒绝注册并明确报错，不得回退显示模块文件名。
+
+区县爬虫的 `SOURCE_NAME` 格式为 `"城市名_区县名_栏目名称"`，例如 `"南京市玄武区_政府发文"`、`"南京市秦淮区_政府办发文"`。栏目不同但区县相同的爬虫，以此完整格式区分。
 
 ## 3. 强制接口
 
@@ -104,7 +109,7 @@ processed_items, api_push_result = save_to_policy(data, SOURCE_NAME)
     "pub_at": pub_at,
     "content": "正文纯文本",
     "selected": False,
-    "category": "中央部委",  # 或“江苏省本级”或者“无锡”、“盐城”等
+    "category": "中央部委",  # 或“江苏省本级”或者“无锡”、“盐城”、“南京_玄武区”等
     "source": SOURCE_NAME,
 }
 ```
@@ -300,7 +305,7 @@ from db_utils import save_to_policy
 
 TARGET_URL = "https://example.gov.cn/list/"
 SOURCE_NAME = "机构名称_栏目名称"
-CATEGORY = "中央部委"  # Jiangsu 下改为“江苏省本级”
+CATEGORY = "中央部委"  # Jiangsu→“江苏省本级”， City→“常州”， District→“南京_玄武区”
 
 HEADERS = {
     "User-Agent": (
@@ -405,6 +410,7 @@ if __name__ == "__main__":
 - `Ministries/`
 - `Jiangsu/`
 - `City/`
+- `District/`
 
 文件只有同时满足以下条件才会成为爬虫入口：
 
@@ -435,7 +441,7 @@ AI Coding 工具完成代码后，必须逐项检查：
 
 - [ ] 文件位于正确目录，文件名以 `_crawler.py` 结尾；
 - [ ] 定义了 `TARGET_URL`、`SOURCE_NAME`、`scrape_data()` 和 `run()`；
-- [ ] category 严格等于 `中央部委` 或 `江苏省本级`；
+- [ ] category 严格等于 `中央部委`、`江苏省本级`、地级市名称或 `城市简称_区县名`；
 - [ ] 使用 `get_crawl_date_window()`、`parse_date()`、`is_target_date()`；
 - [ ] 单日、日期段、滑动窗口三种模式均兼容；
 - [ ] 每个请求都有 timeout，URL 使用 `urljoin()` 规范化；
@@ -446,6 +452,9 @@ AI Coding 工具完成代码后，必须逐项检查：
 - [ ] 返回 `CrawlerRunResult`，不自行打印统一最终模板；
 - [ ] 未在 `crawler_manager.py` 中添加单站导入或注册代码；
 - [ ] 文件可被动态发现一次，`SOURCE_NAME` 包含中文且在全仓库唯一；
+- [ ] `District/` 目录存在且文件命名符合 `{城市拼音}_{区县拼音}_{栏目拼音}_crawler.py` 格式；
+- [ ] category 格式为 `城市简称_区县名`，与 `City/` 下城市简称一致；
+- [ ] `SOURCE_NAME` 格式为 `城市名_区县名_栏目名称` 且全仓库唯一；
 - [ ] 使用 `POLICYCLAW_CRAWLER_FILES=<file_name>` 时只选中预期文件；
 - [ ] 没有修改无关文件或覆盖用户现有改动；
 - [ ] 没有遗留占位 URL、占位选择器、测试数据或调试断点。
