@@ -245,7 +245,7 @@ def normalize_url(url: Any, base_url: str = "") -> str:
 
 def normalize_policy_item(item: Dict[str, Any], source_name: str = "", base_url: str = "") -> Dict[str, Any]:
     normalized = dict(item)
-    normalized["title"] = str(normalized.get("title") or "").strip()
+    normalized["title"] = re.sub(r"\s+", " ", str(normalized.get("title") or "").strip())
     normalized["url"] = normalize_url(normalized.get("url"), base_url)
     pub_at = parse_date(normalized.get("pub_at"))
     normalized["pub_at"] = pub_at.isoformat() if pub_at else ""

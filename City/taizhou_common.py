@@ -62,6 +62,8 @@ GTAPP_PAGE_RE = re.compile(r"page\('(\d+)'\)")
 # 详情页正文候选容器，按优先级排列
 CONTENT_SELECTORS = (
     ".wzzw-article",  # 泰州 CMS 详情页正文
+    ".zoom",  # 靖江 jpaas/hanweb 模板
+    ".main-txt",  # 泰兴 jpaas/hanweb 模板
     "#zoom",  # chinatax 税务平台
     'td[style*="line-height:28px"]',  # 省自然资源厅 gtapp 平台
     ".TRS_Editor",
@@ -103,6 +105,10 @@ def extract_main_content(session, article_url, metrics):
                 text = element.get_text("\n", strip=True)
                 if text:
                     return text
+        desc = soup.select_one('meta[name="Description"]')
+        if desc and desc.get("content"):
+            return desc["content"].strip()
+        metrics.errors.append(f"正文选择器未命中: {article_url}")
         return ""
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")

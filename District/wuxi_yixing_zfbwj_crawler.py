@@ -124,12 +124,24 @@ def _extract_content(session, article_url, metrics):
             or soup.select_one("#zoom")
             or soup.select_one(".xlxlcont")
             or soup.select_one(".Custom_UnionStyle")
+            or soup.select_one(".main_show")
+            or soup.select_one(".art_content")
         )
         if content_elem:
             for extra in content_elem.select("script, style"):
                 extra.decompose()
-            return content_elem.get_text("\\n", strip=True)
+            return content_elem.get_text("\n", strip=True)
+        desc_meta = soup.select_one('meta[name="Description"]')
+        if desc_meta and desc_meta.get("content"):
+            return desc_meta["content"].strip()
+        metrics.errors.append(f"正文选择器未命中: {article_url}")
         return ""
+        desc_meta = soup.select_one('meta[name="Description"]')
+        if desc_meta and desc_meta.get("content"):
+            return desc_meta["content"].strip()
+        metrics.errors.append(f"正文选择器未命中: {article_url}")
+        return ""
+
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""

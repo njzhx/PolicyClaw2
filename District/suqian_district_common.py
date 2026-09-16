@@ -50,6 +50,8 @@ CONTENT_SELECTORS = (
     "div.article-content#zoomcon",
     "#zoomcon",
     "div.article-content",
+    ".zoom",
+    ".main-txt",
     ".TRS_Editor",
     "#zoom",
 )
@@ -84,6 +86,10 @@ def extract_content(session, article_url, metrics):
             content = element.get_text("\n", strip=True)
             if content:
                 return content
+        desc = soup.select_one('meta[name="Description"]')
+        if desc and desc.get("content"):
+            return desc["content"].strip()
+        metrics.errors.append(f"正文选择器未命中: {article_url}")
         return ""
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")

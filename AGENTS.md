@@ -202,6 +202,9 @@ if not is_target_date(pub_at, target_date_from, target_date_to):
 
 - 只保留正文主体，排除导航、页眉页脚、分享按钮、相关推荐等噪声；
 - 使用 `get_text("\n", strip=True)` 等方式保留段落边界；
+- 正文选择器必须经过真实页面验证，不得使用从未访问过的网站凭空编造的选择器；
+- 全部选择器未命中或提取为空时，必须记录 `metrics.errors`（含文章 URL），禁止静默返回空字符串；
+- 图片型、附件型页面无法提取文本正文时，允许使用 `meta[name="Description"]` 内容概述兜底；若概述也为空则记 errors 并返回空；
 - 正文请求失败不能导致整个爬虫退出，应记录到 `metrics.errors` 并继续处理其他文章；
 - 不要随意截断政策正文；如果因外部接口限制必须截断，应先获得维护者确认；
 - 空正文允许入库，但必须增加 `empty_content_count`。
@@ -431,7 +434,8 @@ GitHub 托管 Runner 每日执行全量抓取后，会在 `results/` 生成：
 
 - 爬虫入口执行异常；
 - `target_date_count` 和 `filtered_count` 均为 0，且 `latest_items` 为空；
-- `metrics.errors` 明确包含列表页或列表 API 抓取失败。
+- `metrics.errors` 明确包含列表页或列表 API 抓取失败；
+- `target_date_count > 0` 且 `empty_content_count >= target_date_count`（整站目标日期数据正文全部为空）。
 
 Windows 自建 Runner 稍后下载同日 GitHub Runner 的 Artifact，读取原日期窗口，并通过 `POLICYCLAW_CRAWLER_FILES` 只补跑清单中的文件。清单为空时必须跳过抓取，不能把空筛选误解释为全量运行。定时补抓默认开启 Supabase、API 和飞书；手动触发仍服从工作流输入开关。
 

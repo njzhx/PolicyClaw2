@@ -55,8 +55,14 @@ def _extract_content(session, article_url, metrics):
         if content_elem:
             for extra in content_elem.select("script, style"):
                 extra.decompose()
-            return content_elem.get_text("\\n", strip=True)
+            return content_elem.get_text("\n", strip=True)
         return ""
+        desc_meta = soup.select_one('meta[name="Description"]')
+        if desc_meta and desc_meta.get("content"):
+            return desc_meta["content"].strip()
+        metrics.errors.append(f"正文选择器未命中: {article_url}")
+        return ""
+
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
@@ -132,12 +138,12 @@ def _parse_items(soup):
         date_text = ""
         for span in li.select("span"):
             text = span.get_text(strip=True)
-            if re.search(r"\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2}", text):
+            if re.search(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}", text):
                 date_text = text
                 break
         if not date_text:
             full_text = li.get_text()
-            date_match = re.search(r"(\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2})", full_text)
+            date_match = re.search(r"(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})", full_text)
             if date_match:
                 date_text = date_match.group(1)
 
@@ -150,10 +156,10 @@ def _parse_items(soup):
 
 def _get_page_count(soup):
     page_text = soup.get_text()
-    total_match = re.search(r"总页数[：:]\\s*(\\d+)", page_text)
+    total_match = re.search(r"总页数[：:]\s*(\d+)", page_text)
     if total_match:
         return int(total_match.group(1))
-    total_match = re.search(r"totalRecord>(\\d+)", page_text)
+    total_match = re.search(r"totalRecord>(\d+)", page_text)
     if total_match:
         return (int(total_match.group(1)) + 9) // 10
     return 1

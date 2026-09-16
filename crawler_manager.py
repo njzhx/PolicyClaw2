@@ -357,6 +357,10 @@ class CrawlerManager:
             int(metrics.get("target_date_count") or 0) == 0
             and int(metrics.get("filtered_count") or 0) == 0
             and not (result.get("latest_items") or [])
+        ) or (
+            int(metrics.get("target_date_count") or 0) > 0
+            and int(metrics.get("empty_content_count") or 0)
+            >= int(metrics.get("target_date_count") or 1)
         )
 
     def write_failure_manifest(self, crawl_date_from, crawl_date_to):
@@ -586,7 +590,12 @@ class CrawlerManager:
                         'raw_log_line_count': len(crawler_output.splitlines()),
                     }
 
-                    health_status = "success" if metrics.get("raw_item_count", 0) > 0 else "error"
+                    raw = int(metrics.get("raw_item_count", 0) or 0)
+                    target = int(metrics.get("target_date_count", 0) or 0)
+                    empty_cnt = int(metrics.get("empty_content_count", 0) or 0)
+                    health_status = (
+                        "error" if raw == 0 or (target > 0 and empty_cnt >= target) else "success"
+                    )
                     record_result = save_crawler_run({
                         "run_id": self.run_id,
                         "crawler_key": crawler_key,

@@ -64,6 +64,12 @@ def _extract_content(session, article_url, metrics):
                 extra.decompose()
             return content_elem.get_text("\n", strip=True)
         return ""
+        desc_meta = soup.select_one('meta[name="Description"]')
+        if desc_meta and desc_meta.get("content"):
+            return desc_meta["content"].strip()
+        metrics.errors.append(f"正文选择器未命中: {article_url}")
+        return ""
+
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
