@@ -77,6 +77,7 @@ def aggregate_storage_results(captured_results):
     verified = [result for result in attempted if result.get("counts_verified") is True]
     inserted_count = sum(int(result.get("inserted_count") or 0) for result in verified)
     updated_count = sum(int(result.get("updated_count") or 0) for result in verified)
+    skipped_count = sum(int(result.get("skipped_count") or 0) for result in verified)
     saved_count = sum(int(result.get("saved_count") or 0) for result in results)
     failed_count = sum(int(result.get("failed_count") or 0) for result in results)
 
@@ -91,7 +92,11 @@ def aggregate_storage_results(captured_results):
 
     counts_verified = bool(attempted) and len(verified) == len(attempted)
     if counts_verified:
-        message = f"Supabase 写入完成：新增 {inserted_count} 条，更新 {updated_count} 条"
+        message = f"Supabase 写入完成：新增 {inserted_count} 条"
+        if skipped_count:
+            message += f"，跳过已存在 {skipped_count} 条"
+        elif updated_count:
+            message += f"，更新 {updated_count} 条"
         if failed_count:
             message += f"，失败或无法核验 {failed_count} 条"
     elif status == "skipped" and all(
@@ -106,6 +111,7 @@ def aggregate_storage_results(captured_results):
         "saved_count": saved_count,
         "inserted_count": inserted_count,
         "updated_count": updated_count,
+        "skipped_count": skipped_count,
         "failed_count": failed_count,
         "counts_verified": counts_verified,
         "message": message,
@@ -248,6 +254,7 @@ class DBUtils:
                 "saved_count": 0,
                 "inserted_count": 0,
                 "updated_count": 0,
+                "skipped_count": 0,
                 "failed_count": 0,
                 "counts_verified": False,
                 "message": "没有数据需要写入",
@@ -263,6 +270,7 @@ class DBUtils:
                     "saved_count": 0,
                     "inserted_count": 0,
                     "updated_count": 0,
+                    "skipped_count": 0,
                     "failed_count": 0,
                     "counts_verified": False,
                     "message": "数据校验后没有可写入数据",
@@ -275,6 +283,7 @@ class DBUtils:
             saved_items = []
             inserted_count = 0
             updated_count = 0
+            skipped_count = 0
             failed_count = 0
             storage_errors = []
             if self.allow_supabase_write:
@@ -293,7 +302,11 @@ class DBUtils:
                             )
                             (
                                 supabase.table(self.policy_table)
-                                .upsert(batch, on_conflict="policy_key")
+                                .upsert(
+                                    batch,
+                                    on_conflict="policy_key",
+                                    ignore_duplicates=True,
+                                )
                                 .execute()
                             )
                             keys_after = self.get_existing_policy_keys(
@@ -302,7 +315,7 @@ class DBUtils:
                             persisted_keys = set(batch_keys) & keys_after
                             missing_keys = set(batch_keys) - persisted_keys
                             inserted_count += len(persisted_keys - keys_before)
-                            updated_count += len(persisted_keys & keys_before)
+                            skipped_count += len(persisted_keys & keys_before)
                             failed_count += len(missing_keys)
                             if missing_keys:
                                 storage_errors.append(
@@ -342,10 +355,11 @@ class DBUtils:
                     storage_status = "error"
                 else:
                     storage_status = "success"
-                storage_message = (
-                    f"Supabase 写入完成：新增 {inserted_count} 条，"
-                    f"更新 {updated_count} 条"
-                )
+                storage_message = f"Supabase 写入完成：新增 {inserted_count} 条"
+                if skipped_count:
+                    storage_message += f"，跳过已存在 {skipped_count} 条"
+                elif updated_count:
+                    storage_message += f"，更新 {updated_count} 条"
                 if failed_count:
                     storage_message += f"，失败或无法核验 {failed_count} 条"
                 storage_result = {
@@ -353,6 +367,7 @@ class DBUtils:
                     "saved_count": len(saved_items),
                     "inserted_count": inserted_count,
                     "updated_count": updated_count,
+                    "skipped_count": skipped_count,
                     "failed_count": failed_count,
                     "counts_verified": True,
                     "message": storage_message,
@@ -364,6 +379,7 @@ class DBUtils:
                     "saved_count": 0,
                     "inserted_count": 0,
                     "updated_count": 0,
+                    "skipped_count": 0,
                     "failed_count": 0,
                     "counts_verified": False,
                     "message": "Supabase 写入开关未开启，未统计新增/更新",
@@ -394,6 +410,7 @@ class DBUtils:
                 "saved_count": 0,
                 "inserted_count": 0,
                 "updated_count": 0,
+                "skipped_count": 0,
                 "failed_count": len(data_list),
                 "counts_verified": False,
                 "message": f"数据处理失败 - {e}",
