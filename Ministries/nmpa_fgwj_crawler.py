@@ -6,7 +6,7 @@ import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 
 from bs4 import BeautifulSoup
 
@@ -176,7 +176,7 @@ def scrape_data():
                                 break
 
                         if content_elem:
-                            content = content_elem.get_text(strip=True)
+                            content = extract_content_text(content_elem)
                 except Exception as e:
                     print("[" + "警告" + "] 获取详情页失败: " + policy_url + " - " + str(e))
 

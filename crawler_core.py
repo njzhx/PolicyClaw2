@@ -28,6 +28,65 @@ TRACKING_QUERY_KEYS = {
     "_",
 }
 
+CONTENT_BLOCK_TAGS = {
+    "address", "article", "blockquote", "dd", "div", "dl", "dt",
+    "figcaption", "figure", "footer", "h1", "h2", "h3", "h4", "h5",
+    "h6", "header", "li", "main", "ol", "p", "pre", "section", "table",
+    "tbody", "tfoot", "thead", "tr", "ul",
+}
+
+
+def extract_content_text(element: Any) -> str:
+    """Extract readable text while preserving HTML paragraph boundaries.
+
+    Block elements and ``br`` create line breaks. Inline elements do not, so a
+    paragraph split across spans remains one paragraph. Whitespace introduced
+    only by HTML indentation is removed without joining separate paragraphs.
+    """
+    if element is None:
+        return ""
+
+    parts: List[str] = []
+
+    def walk(node: Any) -> None:
+        if node.__class__.__name__ in {
+            "Comment", "Declaration", "Doctype", "ProcessingInstruction",
+        }:
+            return
+        name = getattr(node, "name", None)
+        if name in {"script", "style", "noscript", "template"}:
+            return
+        if name == "br":
+            parts.append("\n")
+            return
+
+        children = getattr(node, "children", None)
+        if children is None:
+            text = str(node).replace("\r\n", "\n").replace("\r", "\n")
+            if text.strip():
+                parts.append(text)
+            return
+
+        for child in children:
+            child_name = getattr(child, "name", None)
+            if child_name in CONTENT_BLOCK_TAGS and parts and not parts[-1].endswith("\n"):
+                parts.append("\n")
+            walk(child)
+            if child_name in CONTENT_BLOCK_TAGS:
+                parts.append("\n")
+            elif child_name in {"td", "th"}:
+                parts.append("\t")
+
+    walk(element)
+
+    content = "".join(parts)
+    content = re.sub(r"[\f\v ]+", " ", content)
+    content = re.sub(r" *\t *", "\t", content)
+    content = re.sub(r"\t+\n", "\n", content)
+    content = re.sub(r" *\n *", "\n", content)
+    content = re.sub(r"\n+", "\n", content)
+    return content.strip()
+
 
 @dataclass
 class CrawlerMetrics:
