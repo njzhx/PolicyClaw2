@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 目标网站URL - 江苏省国资委 政策文件
@@ -83,7 +83,7 @@ def scrape_data():
                         # 移除不必要标签
                         for extra in c_elem.select('.main-word, .printer, script, style'):
                             extra.decompose()
-                        content = c_elem.get_text(strip=True)
+                        content = extract_content_text(c_elem)
                         content = re.sub(r'浏览次数：.*$|来源：.*$', '', content, flags=re.MULTILINE)
                 except Exception as e:
                     print(f"⚠️  抓取详情页失败: {url} - {e}")

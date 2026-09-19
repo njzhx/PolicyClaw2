@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import CrawlerRunResult, format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import CrawlerRunResult, extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 目标网站URL
@@ -124,7 +124,7 @@ def scrape_data():
                     # 移除无关代码
                     for extra in content_elem.select('script, style'):
                         extra.decompose()
-                    content = content_elem.get_text(strip=True)
+                    content = extract_content_text(content_elem)
                     content = re.sub(r'来源：.*?$|浏览次数：.*?$', '', content, flags=re.MULTILINE).strip()
             except Exception as e:
                 print(f"抓取详情失败：{href} | {e}")

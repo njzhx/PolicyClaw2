@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 import re
 
 headers = {
@@ -104,7 +104,7 @@ def scrape_data():
                                 # 优先使用 #con1，然后尝试其他选择器
                                 content_elem = detail_soup.select_one('#con1') or detail_soup.select_one('.content') or detail_soup.select_one('#content')
                                 if content_elem:
-                                    content = content_elem.get_text(strip=True)
+                                    content = extract_content_text(content_elem)
                             except Exception:
                                 pass
 

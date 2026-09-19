@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 
 from db_utils import save_to_policy
 
@@ -139,7 +139,7 @@ def scrape_data(target_date=None):
                             break
 
                 if content_elem:
-                    content = content_elem.get_text(strip=True)
+                    content = extract_content_text(content_elem)
                     if len(content) > 0:
                         print(f"   📄 成功抓取到内容: 前80字符 = {content[:80]}...")
             except Exception as e:

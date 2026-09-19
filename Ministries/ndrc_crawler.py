@@ -7,7 +7,7 @@ import time
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 
 # 尝试导入 Selenium
 SELENIUM_AVAILABLE = False
@@ -148,7 +148,7 @@ def scrape_data():
                                 break
 
                     if content_div:
-                        content = content_div.get_text(strip=True)
+                        content = extract_content_text(content_div)
                 except Exception as e:
                     print(f"⚠️  抓取详情页失败：{e}")
 

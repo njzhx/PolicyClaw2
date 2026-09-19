@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -72,7 +72,7 @@ def scrape_data():
                     detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
                     content_elem = detail_soup.select_one('.article') or detail_soup.select_one('.content') or detail_soup.select_one('#content')
                     if content_elem:
-                        content = content_elem.get_text(strip=True)
+                        content = extract_content_text(content_elem)
                 except Exception:
                     pass
 

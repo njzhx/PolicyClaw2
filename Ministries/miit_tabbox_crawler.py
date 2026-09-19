@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
 import re
 
 # 导入数据库工具
@@ -151,7 +151,7 @@ def scrape_data():
                                 break
 
                     if content_div:
-                        content = content_div.get_text(strip=True)
+                        content = extract_content_text(content_div)
                 except Exception as e:
                     print(f"⚠️  抓取详情页失败：{e}")
 
