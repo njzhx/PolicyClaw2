@@ -319,6 +319,8 @@ class CrawlerManager:
         print(f"[CRAWLERS] 本次执行爬虫入口: {len(self.crawlers)} 个")
 
     def _metric_health(self, result):
+        if self._failure_reason(result):
+            return "ERROR"
         if result.get("status") == "error":
             return "ERROR"
         metrics = result.get("metrics") or {}
@@ -336,32 +338,52 @@ class CrawlerManager:
         return "OK"
 
     @staticmethod
-    def _list_fetch_failed(result):
+    def _failure_reason(result):
+        """One failure contract for persisted health and retry manifests."""
         if result.get("status") == "error":
-            return True
+            return result.get("error_message") or "爬虫入口执行异常"
         metrics = result.get("metrics") or {}
         list_error_markers = (
             "列表页抓取失败",
             "列表页HTTP错误",
             "API抓取失败",
+            "列表API抓取失败",
+            "API请求失败",
+            "接口请求失败",
+            "导航页抓取失败",
+            "目录页抓取失败",
+            "部门接口失败",
+            "部门页抓取失败",
+            "列表分页抓取失败",
+            "列表页未解析到记录",
+            "导航页未提取到部门链接",
+            "[CHANNEL_MISMATCH]",
+            "[PAGINATION_INCOMPLETE]",
             "list request failed",
             "list page failed",
         )
-        if any(
-            marker in str(error)
-            for error in (metrics.get("errors") or [])
-            for marker in list_error_markers
-        ):
-            return True
-        return (
+        for error in metrics.get("errors") or []:
+            if (any(marker in str(error) for marker in list_error_markers)
+                    or (str(error).startswith("列表页") and "抓取失败" in str(error))):
+                return str(error)
+        if (
             int(metrics.get("target_date_count") or 0) == 0
             and int(metrics.get("filtered_count") or 0) == 0
             and not (result.get("latest_items") or [])
-        ) or (
+        ):
+            return "列表未获得有效文章记录"
+        if (
             int(metrics.get("target_date_count") or 0) > 0
             and int(metrics.get("empty_content_count") or 0)
             >= int(metrics.get("target_date_count") or 1)
-        )
+        ):
+            detail = next(iter(metrics.get("errors") or []), "")
+            return "整站目标日期数据正文全部为空" + (f": {detail}" if detail else "")
+        return None
+
+    @staticmethod
+    def _list_fetch_failed(result):
+        return CrawlerManager._failure_reason(result) is not None
 
     def write_failure_manifest(self, crawl_date_from, crawl_date_to):
         failed_files = sorted({
@@ -403,7 +425,7 @@ class CrawlerManager:
         storage_result = result.get("storage_result") or {}
         api_result = result.get("api_push_result")
 
-        if result.get("status") == "success":
+        if result.get("status") == "success" and result.get("health_status") != "error":
             print(f"✅ {name}爬虫：成功抓取 {result.get('crawl_count', 0)} 条目标日期数据")
             print(f"⏭️  过滤掉 {result.get('filter_count', 0)} 条非目标日期的数据")
             print("📊 页面最新5条是：")
@@ -415,7 +437,8 @@ class CrawlerManager:
             else:
                 print("⚠️  未解析到可展示的页面最新条目")
         else:
-            print(f"❌ {name}爬虫：执行失败 - {result.get('error_message', '未知错误')}")
+            reason = result.get('error_message') or self._failure_reason(result) or '未知错误'
+            print(f"❌ {name}爬虫：执行失败 - {reason}")
 
         execution_time = float(result.get("execution_time", 0) or 0)
         print(f"⏱️  {name}：运行耗时 {execution_time:.2f} 秒")
@@ -590,12 +613,11 @@ class CrawlerManager:
                         'raw_log_line_count': len(crawler_output.splitlines()),
                     }
 
-                    raw = int(metrics.get("raw_item_count", 0) or 0)
-                    target = int(metrics.get("target_date_count", 0) or 0)
-                    empty_cnt = int(metrics.get("empty_content_count", 0) or 0)
-                    health_status = (
-                        "error" if raw == 0 or (target > 0 and empty_cnt >= target) else "success"
-                    )
+                    failure_reason = self._failure_reason(result_entry)
+                    health_status = "error" if failure_reason else "success"
+                    if failure_reason:
+                        result_entry["error_message"] = failure_reason
+                        result_entry["status"] = "error"
                     record_result = save_crawler_run({
                         "run_id": self.run_id,
                         "crawler_key": crawler_key,
@@ -604,7 +626,7 @@ class CrawlerManager:
                         "status": health_status,
                         "raw_item_count": int(metrics.get("raw_item_count", 0) or 0),
                         "target_date_count": int(metrics.get("target_date_count", 0) or 0),
-                        "error_message": None if health_status == "success" else "Article list is empty",
+                        "error_message": failure_reason,
                         "target_url": target_url or None,
                         "started_at": crawler_started_at.isoformat(),
                         "finished_at": datetime.now().astimezone().isoformat(),

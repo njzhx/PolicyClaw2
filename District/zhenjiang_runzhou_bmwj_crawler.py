@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""镇江市润州区_部门发文 爬虫。
+"""镇江市润州区_部门信息公开 爬虫。
 
 列表页为部门信息公开导航页，页面上列各部门链接，需逐个进入
 部门页面提取文件。共享抓取逻辑见 zhenjiang_district_common.py。
@@ -18,7 +18,7 @@ except ImportError:
 
 
 TARGET_URL = "https://www.runzhou.gov.cn/runzhou/zfxxgk/zwgk.shtml"
-SOURCE_NAME = "镇江市润州区_部门发文"
+SOURCE_NAME = "镇江市润州区_部门信息公开"
 CATEGORY = "镇江_润州区"
 
 

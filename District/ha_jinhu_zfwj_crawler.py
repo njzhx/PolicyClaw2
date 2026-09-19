@@ -48,31 +48,44 @@ def _extract_content(session, article_url, metrics):
         response.raise_for_status()
         response.encoding = response.apparent_encoding or "utf-8"
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.content, "html.parser")
-        content_elem = (
-            soup.select_one(".TRS_UEDITOR")
-            or soup.select_one(".article-content")
-            or soup.select_one("#UCAP-CONTENT")
-            or soup.select_one(".TRS_Editor")
-            or soup.select_one("#zoom")
-            or soup.select_one(".Custom_UnionStyle")
-            or soup.select_one(".article")
-            or soup.select_one(".content")
-        )
-        if content_elem:
-            for extra in content_elem.select("script, style"):
+        soup = BeautifulSoup(response.text, "html.parser")
+        media_only = False
+        for selector in ('.TRS_UEDITOR', '.article-content', '#UCAP-CONTENT', '.TRS_Editor', '#zoom', '.Custom_UnionStyle', '.article', '.content'):
+            original = soup.select_one(selector)
+            if original is None:
+                continue
+            # Work on a copy so overlapping fallback containers remain intact.
+            element = BeautifulSoup(str(original), "html.parser")
+            for extra in element.select("script, style"):
                 extra.decompose()
-            return content_elem.get_text("\n", strip=True)
+            has_media = bool(element.select("img, object, embed"))
+            for link in element.select("a[href]"):
+                path = link.get("href", "").split("?", 1)[0].split("#", 1)[0].lower()
+                if path.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")):
+                    has_media = True
+                    link.decompose()
+            text = element.get_text("\n", strip=True)
+            if text:
+                return text
+            media_only = media_only or has_media
+            if has_media:
+                break
+        if media_only:
+            desc = soup.select_one('meta[name="Description"], meta[name="description"]')
+            summary = str(desc.get("content") or "").strip() if desc else ""
+            title = soup.title.get_text(" ", strip=True) if soup.title else ""
+            title_meta = soup.select_one('meta[name="ArticleTitle"]')
+            article_title = str(title_meta.get("content") or "").strip() if title_meta else ""
+            if summary and summary not in {title, article_title}:
+                return summary
+            metrics.errors.append(f"[ATTACHMENT_ONLY] 图片/附件型页面无可提取网页正文: {article_url}")
+        else:
+            metrics.errors.append(f"[CONTENT_MISSING] 正文选择器未命中或正文为空: {article_url}")
         return ""
-        desc_meta = soup.select_one('meta[name="Description"]')
-        if desc_meta and desc_meta.get("content"):
-            return desc_meta["content"].strip()
-        metrics.errors.append(f"正文选择器未命中: {article_url}")
-        return ""
-
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
+
 
 
 def _fetch_list(session, page, metrics):
@@ -110,61 +123,73 @@ def _fetch_list(session, page, metrics):
 
 
 def scrape_data():
-    policies = []
-    latest_items = []
+    policies, latest_items = [], []
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
     session.trust_env = False
-    session.proxies = {"http": None, "https": None}
-
-    page = 1
-    max_pages = 10
-    while page <= max_pages:
+    seen, pages = set(), set()
+    try:
+        response = session.post(urljoin(TARGET_URL, "/openGovernmentAffairsController/getName.do"),
+                                data={"topic": "4877"}, headers=API_HEADERS, timeout=30)
+        response.raise_for_status()
+        if response.json().get("value", {}).get("menuName") != "政府文件":
+            metrics.errors.append(f"[CHANNEL_MISMATCH] 政府文件栏目校验失败: {TARGET_URL}")
+            return policies, latest_items, metrics
+    except Exception as exc:
+        metrics.errors.append(f"列表页抓取失败: {TARGET_URL} - {exc}")
+        return policies, latest_items, metrics
+    for page in range(1, 501):
         items, total = _fetch_list(session, page, metrics)
         if not items:
+            if total:
+                metrics.errors.append(f"[PAGINATION_INCOMPLETE] 提前返回空页: {TARGET_URL} page={page}")
             break
-        oldest_on_page = None
+        signature = tuple(str(x.get("path")) for x in items)
+        if signature in pages:
+            metrics.errors.append(f"[PAGINATION_INCOMPLETE] 重复页: {TARGET_URL} page={page}")
+            break
+        pages.add(signature)
         for item in items:
-            title = (item.get("title") or "").strip()
-            path = (item.get("path") or "").strip()
-            domain = (item.get("domain") or "").strip()
-            date_str = (item.get("releaseTime") or "").strip()
-            if not title or not path:
+            metrics.raw_item_count += 1
+            try:
+                title = str(item.get("title") or "").strip()
+                path = str(item.get("path") or "").strip()
+                pub_at = parse_date(item.get("releaseTime"))
+                if not title or not path or not pub_at:
+                    metrics.invalid_item_count += 1
+                    metrics.errors.append(f"列表记录缺少标题/链接/发布日期: {TARGET_URL} page={page}")
+                    continue
+                metrics.valid_item_count += 1
+                article_url = urljoin(item.get("domain") or TARGET_URL, path)
+                if article_url in seen:
+                    metrics.duplicate_policy_count += 1
+                    continue
+                seen.add(article_url)
+                # Official government-files channel contains both issuers.
+                office = "政府办公室" in title or "政府办关于" in title
+                if office != ("政府办发文" in SOURCE_NAME):
+                    continue
+                latest_items.append({"title": title, "pub_at": pub_at})
+                if not is_target_date(pub_at, target_from, target_to):
+                    metrics.filtered_count += 1
+                    continue
+                policies.append({"title": title, "url": article_url, "pub_at": pub_at,
+                                 "content": _extract_content(session, article_url, metrics),
+                                 "selected": False, "category": CATEGORY, "source": SOURCE_NAME})
+            except Exception as exc:
                 metrics.invalid_item_count += 1
-                continue
-            pub_at = parse_date(date_str) if date_str else None
-            if not pub_at:
-                metrics.invalid_item_count += 1
-                continue
-            if oldest_on_page is None or pub_at < oldest_on_page:
-                oldest_on_page = pub_at
-            article_url = (domain.rstrip("/") + "/" + path.lstrip("/")) if domain else urljoin(TARGET_URL, path)
-            metrics.valid_item_count += 1
-            latest_items.append({"title": title, "pub_at": pub_at})
-            if not is_target_date(pub_at, target_from, target_to):
-                metrics.filtered_count += 1
-                continue
-            policies.append({
-                "title": title,
-                "url": article_url,
-                "pub_at": pub_at,
-                "content": _extract_content(session, article_url, metrics),
-                "selected": False,
-                "category": CATEGORY,
-                "source": SOURCE_NAME,
-            })
-        total_pages = (total + 14) // 15 if total else 0
-        if page >= total_pages:
+                metrics.errors.append(f"列表记录解析失败: {TARGET_URL} - {exc}")
+        if page * 15 >= total:
             break
-        if oldest_on_page and oldest_on_page < target_from:
-            break
-        page += 1
-
-    metrics.raw_item_count = metrics.valid_item_count + metrics.invalid_item_count
+    else:
+        metrics.errors.append(f"[PAGINATION_INCOMPLETE] 达到安全页数上限: {TARGET_URL}")
+    session.close()
+    latest_items.sort(key=lambda x: x["pub_at"], reverse=True)
     metrics.target_date_count = len(policies)
-    metrics.empty_content_count = sum(1 for item in policies if not item.get("content"))
+    metrics.empty_content_count = sum(not x["content"] for x in policies)
     return policies, latest_items[:5], metrics
+
 
 
 def run():

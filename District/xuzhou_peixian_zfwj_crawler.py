@@ -88,34 +88,45 @@ def _extract_content(session, article_url, metrics):
         response = session.get(article_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         response.encoding = response.apparent_encoding or "utf-8"
-        soup = BeautifulSoup(response.content, "html.parser")
-        content_elem = (
-            soup.select_one(".TRS_UEDITOR")
-            or soup.select_one(".wenZhang")
-            or soup.select_one(".article-content")
-            or soup.select_one("#UCAP-CONTENT")
-            or soup.select_one(".TRS_Editor")
-            or soup.select_one(".pages_content")
-            or soup.select_one("#zoom")
-            or soup.select_one(".xlxlcont")
-            or soup.select_one(".Custom_UnionStyle")
-            or soup.select_one(".ewb-article-content")
-            or soup.select_one(".article")
-        )
-        if content_elem:
-            for extra in content_elem.select("script, style"):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.text, "html.parser")
+        media_only = False
+        for selector in ('#ivs_content', '.TRS_UEDITOR', '.wenZhang', '.article-content', '#UCAP-CONTENT', '.TRS_Editor', '.pages_content', '#zoom', '.xlxlcont', '.Custom_UnionStyle', '.ewb-article-content', '.article'):
+            original = soup.select_one(selector)
+            if original is None:
+                continue
+            # Work on a copy so overlapping fallback containers remain intact.
+            element = BeautifulSoup(str(original), "html.parser")
+            for extra in element.select("script, style"):
                 extra.decompose()
-            return content_elem.get_text("\n", strip=True)
+            has_media = bool(element.select("img, object, embed"))
+            for link in element.select("a[href]"):
+                path = link.get("href", "").split("?", 1)[0].split("#", 1)[0].lower()
+                if path.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")):
+                    has_media = True
+                    link.decompose()
+            text = element.get_text("\n", strip=True)
+            if text:
+                return text
+            media_only = media_only or has_media
+            if has_media:
+                break
+        if media_only:
+            desc = soup.select_one('meta[name="Description"], meta[name="description"]')
+            summary = str(desc.get("content") or "").strip() if desc else ""
+            title = soup.title.get_text(" ", strip=True) if soup.title else ""
+            title_meta = soup.select_one('meta[name="ArticleTitle"]')
+            article_title = str(title_meta.get("content") or "").strip() if title_meta else ""
+            if summary and summary not in {title, article_title}:
+                return summary
+            metrics.errors.append(f"[ATTACHMENT_ONLY] 图片/附件型页面无可提取网页正文: {article_url}")
+        else:
+            metrics.errors.append(f"[CONTENT_MISSING] 正文选择器未命中或正文为空: {article_url}")
         return ""
-        desc_meta = soup.select_one('meta[name="Description"]')
-        if desc_meta and desc_meta.get("content"):
-            return desc_meta["content"].strip()
-        metrics.errors.append(f"正文选择器未命中: {article_url}")
-        return ""
-
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
+
 
 
 def scrape_data():
@@ -124,25 +135,41 @@ def scrape_data():
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
+    session.trust_env = False
 
     site_guid = _extract_site_guid(session, metrics)
     if not site_guid:
-        return policies, latest_items[:5], metrics
+        return policies, sorted(latest_items, key=lambda x: x["pub_at"], reverse=True)[:5], metrics
 
     all_items = []
     page = 0
-    max_pages = 10
+    max_pages = 100
+    signatures = set()
     while page < max_pages:
+        import os
+        import time
+        deadline = float(os.getenv("POLICYCLAW_CRAWLER_DEADLINE_EPOCH") or 0)
+        if deadline and time.time() + 35 >= deadline:
+            metrics.errors.append(f"[PAGINATION_INCOMPLETE] 运行预算不足: {TARGET_URL} page={page}")
+            break
         items, page_count = _fetch_list_via_api(session, site_guid, page, metrics)
         if not items:
             break
+        signature = tuple(str(x.get("infourl")) if isinstance(x, dict) else repr(x) for x in items)
+        if signature in signatures:
+            metrics.errors.append(f"[PAGINATION_INCOMPLETE] 重复页: {TARGET_URL} page={page}")
+            break
+        signatures.add(signature)
         all_items.extend(items)
         if page + 1 >= page_count or page_count == 0:
             break
         page += 1
+    else:
+        metrics.errors.append(f"[PAGINATION_INCOMPLETE] 达到安全页数上限: {TARGET_URL}")
 
     metrics.raw_item_count = len(all_items)
 
+    seen_urls = set()
     for item in all_items:
         try:
             title = (item.get("title") or "").strip()
@@ -158,7 +185,12 @@ def scrape_data():
                 metrics.errors.append(f"无法解析日期: {title[:30]}...")
                 continue
 
-            article_url = urljoin(BASE_DOMAIN, infourl)
+            from urllib.parse import urldefrag
+            article_url = urldefrag(urljoin(BASE_DOMAIN, infourl))[0]
+            if article_url in seen_urls:
+                metrics.duplicate_policy_count += 1
+                continue
+            seen_urls.add(article_url)
             metrics.valid_item_count += 1
             latest_items.append({"title": title, "pub_at": pub_at})
 
@@ -184,7 +216,7 @@ def scrape_data():
     metrics.empty_content_count = sum(
         1 for item in policies if not item.get("content")
     )
-    return policies, latest_items[:5], metrics
+    return policies, sorted(latest_items, key=lambda x: x["pub_at"], reverse=True)[:5], metrics
 
 
 def run():

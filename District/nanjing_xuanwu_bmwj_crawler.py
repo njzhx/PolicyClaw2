@@ -36,28 +36,45 @@ def _extract_content(session, article_url, metrics):
         response = session.get(article_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         response.encoding = response.apparent_encoding or "utf-8"
-        soup = BeautifulSoup(response.content, "html.parser")
-        content_elem = (
-            soup.select_one(".TRS_UEDITOR")
-            or soup.select_one(".wenZhang")
-            or soup.select_one(".article-content")
-            or soup.select_one("#UCAP-CONTENT")
-            or soup.select_one(".TRS_Editor")
-        )
-        if content_elem:
-            for extra in content_elem.select("script, style"):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.text, "html.parser")
+        media_only = False
+        for selector in ('.TRS_UEDITOR', '.wenZhang', '.article-content', '#UCAP-CONTENT', '.TRS_Editor'):
+            original = soup.select_one(selector)
+            if original is None:
+                continue
+            # Work on a copy so overlapping fallback containers remain intact.
+            element = BeautifulSoup(str(original), "html.parser")
+            for extra in element.select("script, style"):
                 extra.decompose()
-            return content_elem.get_text("\n", strip=True)
+            has_media = bool(element.select("img, object, embed"))
+            for link in element.select("a[href]"):
+                path = link.get("href", "").split("?", 1)[0].split("#", 1)[0].lower()
+                if path.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")):
+                    has_media = True
+                    link.decompose()
+            text = element.get_text("\n", strip=True)
+            if text:
+                return text
+            media_only = media_only or has_media
+            if has_media:
+                break
+        if media_only:
+            desc = soup.select_one('meta[name="Description"], meta[name="description"]')
+            summary = str(desc.get("content") or "").strip() if desc else ""
+            title = soup.title.get_text(" ", strip=True) if soup.title else ""
+            title_meta = soup.select_one('meta[name="ArticleTitle"]')
+            article_title = str(title_meta.get("content") or "").strip() if title_meta else ""
+            if summary and summary not in {title, article_title}:
+                return summary
+            metrics.errors.append(f"[ATTACHMENT_ONLY] 图片/附件型页面无可提取网页正文: {article_url}")
+        else:
+            metrics.errors.append(f"[CONTENT_MISSING] 正文选择器未命中或正文为空: {article_url}")
         return ""
-        desc_meta = soup.select_one('meta[name="Description"]')
-        if desc_meta and desc_meta.get("content"):
-            return desc_meta["content"].strip()
-        metrics.errors.append(f"正文选择器未命中: {article_url}")
-        return ""
-
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
+
 
 
 def scrape_data():
@@ -96,7 +113,7 @@ def scrape_data():
                     if not link or not link.get("href"):
                         continue
 
-                    title = link.get_text(" ", strip=True)
+                    title = (link.get("title") or link.get_text(" ", strip=True)).strip()
                     href = (link.get("href") or "").strip()
                     if not title or not href:
                         continue
