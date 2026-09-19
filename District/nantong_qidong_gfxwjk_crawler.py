@@ -54,30 +54,44 @@ def _extract_content(session, article_url, metrics):
         response.raise_for_status()
         response.encoding = response.apparent_encoding or "utf-8"
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.content, "html.parser")
-        content_elem = (
-            soup.select_one(".TRS_UEDITOR")
-            or soup.select_one(".article-content")
-            or soup.select_one("#UCAP-CONTENT")
-            or soup.select_one(".TRS_Editor")
-            or soup.select_one("#zoom")
-            or soup.select_one(".Custom_UnionStyle")
-            or soup.select_one(".content")
-        )
-        if content_elem:
-            for extra in content_elem.select("script, style"):
+        soup = BeautifulSoup(response.text, "html.parser")
+        media_only = False
+        for selector in ('.TRS_UEDITOR', '.article-content', '#UCAP-CONTENT', '.TRS_Editor', '#zoom', '.Custom_UnionStyle', '.content'):
+            original = soup.select_one(selector)
+            if original is None:
+                continue
+            # Work on a copy so overlapping fallback containers remain intact.
+            element = BeautifulSoup(str(original), "html.parser")
+            for extra in element.select("script, style"):
                 extra.decompose()
-            return content_elem.get_text("\n", strip=True)
+            has_media = bool(element.select("img, object, embed"))
+            for link in element.select("a[href]"):
+                path = link.get("href", "").split("?", 1)[0].split("#", 1)[0].lower()
+                if path.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")):
+                    has_media = True
+                    link.decompose()
+            text = element.get_text("\n", strip=True)
+            if text:
+                return text
+            media_only = media_only or has_media
+            if has_media:
+                break
+        if media_only:
+            desc = soup.select_one('meta[name="Description"], meta[name="description"]')
+            summary = str(desc.get("content") or "").strip() if desc else ""
+            title = soup.title.get_text(" ", strip=True) if soup.title else ""
+            title_meta = soup.select_one('meta[name="ArticleTitle"]')
+            article_title = str(title_meta.get("content") or "").strip() if title_meta else ""
+            if summary and summary not in {title, article_title}:
+                return summary
+            metrics.errors.append(f"[ATTACHMENT_ONLY] 图片/附件型页面无可提取网页正文: {article_url}")
+        else:
+            metrics.errors.append(f"[CONTENT_MISSING] 正文选择器未命中或正文为空: {article_url}")
         return ""
-        desc_meta = soup.select_one('meta[name="Description"]')
-        if desc_meta and desc_meta.get("content"):
-            return desc_meta["content"].strip()
-        metrics.errors.append(f"正文选择器未命中: {article_url}")
-        return ""
-
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
         return ""
+
 
 
 def scrape_data():
@@ -102,7 +116,7 @@ def scrape_data():
     }
 
     page = 1
-    max_pages = 10
+    max_pages = 100
     while page <= max_pages:
         try:
             r = session.post(
@@ -178,6 +192,8 @@ def scrape_data():
         except Exception as exc:
             metrics.errors.append(f"列表页{page}抓取失败: {exc}")
             break
+    else:
+        metrics.errors.append(f"[PAGINATION_INCOMPLETE] 达到安全页数上限，日期窗口未覆盖: {TARGET_URL}")
 
     metrics.raw_item_count = metrics.valid_item_count + metrics.invalid_item_count
     metrics.target_date_count = len(policies)

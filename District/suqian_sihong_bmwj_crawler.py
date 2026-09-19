@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""宿迁市泗洪县_部门发文 爬虫。
+"""宿迁市泗洪县_行政规范性文件 爬虫。
 
 列表页为宿迁市区县行政规范性文件栏目（ul.gzklist > li.flex.btime），
-日期从 li[stime] 属性提取，为空时从 href 路径 /YYYYMM/ 推断。
+日期从 li[stime] 属性提取；缺失时核实详情页 PubDate，不从 URL 月份编造日期。
 分页 URL 为 前缀_N.shtml。共享抓取逻辑见 suqian_district_common.py。
 """
 
@@ -19,7 +19,7 @@ except ImportError:
 
 
 TARGET_URL = "http://www.sihong.gov.cn/sihong/xzgfxwj/xzgfxwj_list.shtml"
-SOURCE_NAME = "宿迁市泗洪县_部门发文"
+SOURCE_NAME = "宿迁市泗洪县_行政规范性文件"
 CATEGORY = "宿迁_泗洪县"
 
 
