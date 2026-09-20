@@ -167,7 +167,10 @@ def scrape_data():
                 href = str(row.get("DOCPUBURL") or "").strip()
                 raw_date = str(row.get("DOCRELTIME") or "")
                 if raw_date.endswith("Z"):
-                    raw_date = datetime.fromisoformat(raw_date).astimezone(timezone(timedelta(hours=8))).date()
+                    parsed_datetime = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                    if parsed_datetime.tzinfo is not None:
+                        parsed_datetime = parsed_datetime.astimezone(timezone(timedelta(hours=8)))
+                    raw_date = parsed_datetime.date()
                 pub_at = parse_date(raw_date)
                 if not title or not href or not pub_at:
                     metrics.invalid_item_count += 1

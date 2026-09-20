@@ -1,174 +1,91 @@
-SOURCE_NAME = '水利部_规范性文件'
+"""水利部规范性文件爬虫。"""
+import re
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta, timezone
 
-from crawler_core import format_date_window, get_crawl_date_window, is_target_date
-import re
-
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
+from crawler_core import CrawlerMetrics, CrawlerRunResult, get_crawl_date_window, is_target_date, parse_date
+from db_utils import save_to_policy
 
 TARGET_URL = "http://www.mwr.gov.cn/zw/zcfg/gfxwj/"
+SOURCE_NAME = "水利部_规范性文件"
+CATEGORY = "中央部委"
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36"}
+
+
+def _extract_content(session, article_url, metrics):
+    try:
+        response = session.get(article_url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, "html.parser")
+        element = soup.select_one(".gknb_content, #zoom, .article-content")
+        if element:
+            for node in element.select("script, style, noscript"):
+                node.decompose()
+            text = element.get_text("\n", strip=True)
+            if text:
+                return text
+        metrics.errors.append(f"[CONTENT_MISSING] 正文选择器未命中或正文为空: {article_url}")
+    except Exception as exc:
+        metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
+    return ""
 
 
 def scrape_data():
-    policies = []
-    all_items = []
-    url = TARGET_URL
-
+    policies, latest_items = [], []
+    metrics = CrawlerMetrics()
+    target_from, target_to = get_crawl_date_window()
+    session = requests.Session()
+    session.trust_env = False
     try:
-        target_date_from, target_date_to = get_crawl_date_window()
-        target_date_label = format_date_window(target_date_from, target_date_to)
-        today = datetime.now(timezone(timedelta(hours=8))).date()
-        print(f"[DATE] 运行日期（北京时间）：{today}")
-        print(f"[TARGET] 目标抓取日期：{target_date_label}")
-
-        response = requests.get(url, headers=headers, timeout=30)
+        response = session.get(TARGET_URL, headers=HEADERS, timeout=30)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        container = soup.find('div', class_=lambda x: x and 'slnewscon' in x)
-        if not container:
-            print('[ERROR] 水利部规范性文件爬虫：未找到目标容器 div.slnewscon')
-            return policies, all_items
-
-        ul_element = container.find('ul')
-        if not ul_element:
-            print('[ERROR] 水利部规范性文件爬虫：未找到列表 ul')
-            return policies, all_items
-
-        li_elements = ul_element.find_all('li')
-        if not li_elements:
-            print('[ERROR] 水利部规范性文件爬虫：列表为空')
-            return policies, all_items
-
-        filtered_count = 0
-
-        for li in li_elements:
+        soup = BeautifulSoup(response.content, "html.parser")
+        container = soup.select_one("div.slnewscon")
+        nodes = container.select("ul li") if container else []
+        metrics.raw_item_count = len(nodes)
+        if not nodes:
+            metrics.errors.append(f"列表页解析为空: {TARGET_URL}")
+        for node in nodes:
             try:
-                a_tag = li.find('a')
-                if not a_tag:
-                    continue
-
-                title = a_tag.get('title', '').strip()
-                if not title:
-                    title = a_tag.get_text(strip=True)
-
-                href = a_tag.get('href', '').strip()
-
-                if not title or not href:
-                    continue
-
-                article_url = href
-                if not article_url.startswith('http'):
-                    if article_url.startswith('/'):
-                        article_url = "http://www.mwr.gov.cn" + href
-                    elif article_url.startswith('../'):
-                        article_url = "http://www.mwr.gov.cn/zw/zcfg/gfxwj/" + href
-                        while '../' in article_url:
-                            article_url = article_url.replace('../', '', 1)
-                    else:
-                        article_url = "http://www.mwr.gov.cn/" + href
-
-                pub_at = None
-                span_tags = li.find_all('span')
-                for span in span_tags:
-                    span_text = span.get_text(strip=True)
-                    date_match = re.search(r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})日?', span_text)
-                    if date_match:
-                        try:
-                            pub_at = datetime.strptime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", '%Y-%m-%d').date()
-                            break
-                        except ValueError:
-                            pass
-
+                link = node.select_one("a[href]")
+                title = ((link.get("title") or link.get_text(" ", strip=True)) if link else "").strip()
+                href = (link.get("href") or "").strip() if link else ""
+                match = re.search(r"\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?", node.get_text(" ", strip=True))
+                pub_at = parse_date(match.group(0)) if match else None
                 if not pub_at:
-                    date_match = re.search(r'/(\d{4})(\d{2})(\d{2})/', href)
-                    if date_match:
-                        try:
-                            pub_at = datetime.strptime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", '%Y-%m-%d').date()
-                        except ValueError:
-                            pass
-
-                all_items.append({'title': title, 'pub_at': pub_at})
-
-                if not is_target_date(pub_at, target_date_from, target_date_to):
-                    filtered_count += 1
+                    path_match = re.search(r"/(\d{4})(\d{2})(\d{2})/", href)
+                    pub_at = parse_date("-".join(path_match.groups())) if path_match else None
+                if not title or not href or not pub_at:
+                    metrics.invalid_item_count += 1
                     continue
-
-                content = ""
-                try:
-                    detail_resp = requests.get(article_url, headers=headers, timeout=15)
-                    detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
-
-                    content_elem = detail_soup.find('div', class_='gknb_content')
-                    if content_elem:
-                        text = content_elem.get_text(separator='\n', strip=True)
-                        lines = [line.strip() for line in text.split('\n') if line.strip()]
-                        if lines:
-                            content = '\n'.join(lines)
-
-                    if not content or len(content) < 50:
-                        print(f'[WARN] 警告：文章内容可能未爬取成功 - {title[:50]}')
-                        print(f'   链接: {article_url}')
-                        print(f'   内容长度: {len(content)} 字符')
-
-                except Exception as e:
-                    print(f'[WARN] 抓取详情页失败: {article_url} - {e}')
-
-                policy_data = {
-                    'title': title,
-                    'url': article_url,
-                    'pub_at': pub_at,
-                    'content': content,
-                    'selected': False,
-                    'category': '中央部委',
-                    'source': '水利部规范性文件'
-                }
-                policies.append(policy_data)
-
-            except Exception:
-                continue
-
-        print(f'[OK] 水利部规范性文件爬虫：成功抓取 {len(policies)} 条目标日期窗口数据')
-        print(f'[SKIP] 过滤掉 {filtered_count} 条非目标日期的数据')
-
-        if all_items:
-            print('[INFO] 页面最新5条是：')
-            for i, item in enumerate(all_items[:5], 1):
-                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
-                print(f'  {i}. {item["title"][:60]}... {date_str}')
-
-    except Exception as e:
-        print(f'[ERROR] 水利部规范性文件爬虫：抓取失败 - {e}')
-        print("----------------------------------------")
-
-    return policies, all_items
-
-
-def save_to_supabase(data_list):
-    try:
-        from db_utils import save_to_policy
-        return save_to_policy(data_list, "水利部_规范性文件")
-    except Exception:
-        return data_list
+                article_url = urljoin(TARGET_URL, href)
+                metrics.valid_item_count += 1
+                latest_items.append({"title": title, "pub_at": pub_at})
+                if not is_target_date(pub_at, target_from, target_to):
+                    metrics.filtered_count += 1
+                    continue
+                policies.append({"title": title, "url": article_url, "pub_at": pub_at,
+                                 "content": _extract_content(session, article_url, metrics),
+                                 "selected": False, "category": CATEGORY, "source": SOURCE_NAME})
+            except Exception as exc:
+                metrics.invalid_item_count += 1
+                metrics.errors.append(f"列表记录解析失败: {exc}")
+    except Exception as exc:
+        metrics.errors.append(f"列表页抓取失败: {TARGET_URL} - {exc}")
+    finally:
+        session.close()
+    metrics.target_date_count = len(policies)
+    metrics.empty_content_count = sum(not item.get("content") for item in policies)
+    return policies, latest_items[:5], metrics
 
 
 def run():
-    try:
-        data, _ = scrape_data()
-        result = save_to_supabase(data)
-        print(f'[DB] 写入数据库: {len(result)} 条')
-        print("----------------------------------------")
-        print("[OK] 爬虫 水利部规范性文件 执行成功")
-        return result
-    except Exception as e:
-        print(f'[ERROR] 爬虫 水利部规范性文件 运行失败 - {e}')
-        print("----------------------------------------")
-        return []
+    data, latest_items, metrics = scrape_data()
+    processed_items, api_push_result = save_to_policy(data, SOURCE_NAME)
+    return CrawlerRunResult(items=processed_items, latest_items=latest_items, metrics=metrics,
+                            api_push_result=api_push_result)
 
 
 if __name__ == "__main__":

@@ -4,8 +4,10 @@
 说明：列表通过 AJAX 接口 /appsearch/xcapi/list 加载
 """
 from urllib.parse import urljoin
+from io import BytesIO
 
 import requests
+from pypdf import PdfReader
 
 from crawler_core import (
     CrawlerMetrics,
@@ -47,6 +49,7 @@ def _extract_content(session, article_url, metrics):
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(response.text, "html.parser")
         media_only = False
+        pdf_urls = []
         for selector in ('.TRS_UEDITOR', '.article-content', '#UCAP-CONTENT', '.TRS_Editor', '#zoom', '.Custom_UnionStyle', '.article', '.content'):
             original = soup.select_one(selector)
             if original is None:
@@ -60,6 +63,8 @@ def _extract_content(session, article_url, metrics):
                 path = link.get("href", "").split("?", 1)[0].split("#", 1)[0].lower()
                 if path.endswith((".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")):
                     has_media = True
+                    if path.endswith(".pdf"):
+                        pdf_urls.append(urljoin(article_url, link.get("href", "")))
                     link.decompose()
             text = element.get_text("\n", strip=True)
             if text:
@@ -68,6 +73,15 @@ def _extract_content(session, article_url, metrics):
             if has_media:
                 break
         if media_only:
+            for pdf_url in pdf_urls:
+                try:
+                    pdf_response = session.get(pdf_url, headers=HEADERS, timeout=30)
+                    pdf_response.raise_for_status()
+                    text = "\n".join((page.extract_text() or "").strip() for page in PdfReader(BytesIO(pdf_response.content)).pages).strip()
+                    if text:
+                        return text
+                except Exception as exc:
+                    metrics.errors.append(f"PDF附件正文提取失败: {pdf_url} - {exc}")
             desc = soup.select_one('meta[name="Description"], meta[name="description"]')
             summary = str(desc.get("content") or "").strip() if desc else ""
             title = soup.title.get_text(" ", strip=True) if soup.title else ""
