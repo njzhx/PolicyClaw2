@@ -36,6 +36,11 @@ def _get_page_url(page: int) -> str:
 def _extract_content(session, article_url, metrics):
     try:
         response = session.get(article_url, headers=HEADERS, timeout=15)
+        if response.status_code == 412 and "nhc.gov.cn" in article_url:
+            metrics.errors.append(
+                f"[UPSTREAM_BLOCKED_412] 国家卫健委跨站详情页触发访问校验: {article_url}"
+            )
+            return ""
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
         content_elem = soup.select_one("#zoomcon UCAPCONTENT") or soup.select_one("#zoomcon")
@@ -56,6 +61,7 @@ def scrape_data():
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
+    session.trust_env = False
 
     oldest_date_on_page = None
 

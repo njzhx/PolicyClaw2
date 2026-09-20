@@ -77,98 +77,135 @@ def _extract_content(session, article_url, metrics):
 
 
 
+def _list_api_config(html):
+    import re
+    from urllib.parse import parse_qs, urlsplit
+    def required(pattern):
+        match = re.search(pattern, html)
+        if not match:
+            raise ValueError("[CHANNEL_MISMATCH] 官网列表参数缺失，拒绝全站检索")
+        return match.group(1)
+    site_meta = BeautifulSoup(html, "html.parser").select_one('meta[name="SiteName"]')
+    if not site_meta or CATEGORY.split("_", 1)[1] not in site_meta.get("content", ""):
+        raise ValueError("[CHANNEL_MISMATCH] 官网声明地域与爬虫区县不符")
+    api = urljoin(TARGET_URL, required(r'websiteURL\s*=\s*["\']([^"\']+)'))
+    if urlsplit(api).hostname != urlsplit(TARGET_URL).hostname:
+        raise ValueError("[CHANNEL_MISMATCH] 列表接口跨站")
+    site = required(r'var\s+siteId\s*=\s*(\d+)')
+    channel = required(r'filter\[CHANNELID\].*?=\s*(\d+)')
+    group = required(r'classinfoids\s*=\s*["\']([^"\']+)')
+    category_key = parse_qs(urlsplit(TARGET_URL).query).get("tp", ["GROUPCAT"])[0]
+    if category_key != "GROUPCAT":
+        raise ValueError("[CHANNEL_MISMATCH] 未验证的分类参数")
+    return api, {
+        "index": required(r'index:\s*["\']([^"\']+)'),
+        "type": required(r'type:\s*["\']([^"\']+)'),
+        "siteId": site, "pageSize": int(required(r'var\s+pageSize\s*=\s*(\d+)')),
+        "orderProperty": "DOCRELTIME", "orderDirection": "desc",
+        "filter[SITEID]": site, "filter[CHANNELID]": channel, "filter[GROUPCAT]": group,
+    }
+
+
 def scrape_data():
-    policies = []
-    latest_items = []
+    import os
+    import time
+    from datetime import datetime, timezone, timedelta
+    from urllib.parse import urldefrag
+    policies, latest_items = [], []
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
-
-    page = 1
-    while True:
-        if page == 1:
-            page_url = TARGET_URL
-        else:
-            page_url = TARGET_URL.replace(".html", f"_{page}.html")
-
-        try:
-            response = session.get(page_url, headers=HEADERS, timeout=30)
-            response.raise_for_status()
-            response.encoding = response.apparent_encoding or "utf-8"
-            soup = BeautifulSoup(response.content, "html.parser")
-            nodes = soup.select("#result li")
-            if not nodes:
-                nodes = soup.select("ul li")
-                nodes = [n for n in nodes if n.select_one("span.d1 a")]
-            if not nodes:
-                break
-
-            oldest_date_on_page = None
-
-            for node in nodes:
-                try:
-                    link = node.select_one("span.d1 a")
-                    if not link:
-                        link = node.select_one("a")
-                    if not link or not link.get("href"):
-                        continue
-
-                    title = (link.get("title") or link.get_text(" ", strip=True)).strip()
-                    href = (link.get("href") or "").strip()
-                    if not title or not href:
-                        continue
-
-                    date_elem = node.select_one("span.d2")
-                    pub_at = None
-                    if date_elem:
-                        pub_at = parse_date(date_elem.get_text(strip=True))
-                    if not pub_at:
-                        metrics.invalid_item_count += 1
-                        metrics.errors.append(f"无法解析日期: {title[:30]}...")
-                        continue
-
-                    if oldest_date_on_page is None or pub_at < oldest_date_on_page:
-                        oldest_date_on_page = pub_at
-
-                    article_url = urljoin(page_url, href)
-                    metrics.valid_item_count += 1
-                    latest_items.append({"title": title, "pub_at": pub_at})
-
-                    if not is_target_date(pub_at, target_from, target_to):
-                        metrics.filtered_count += 1
-                        continue
-
-                    content = _extract_content(session, article_url, metrics)
-                    policies.append({
-                        "title": title,
-                        "url": article_url,
-                        "pub_at": pub_at,
-                        "content": content,
-                        "selected": False,
-                        "category": CATEGORY,
-                        "source": SOURCE_NAME,
-                    })
-                except Exception as exc:
-                    metrics.invalid_item_count += 1
-                    metrics.errors.append(f"列表记录解析失败: {exc}")
-
-            if oldest_date_on_page and oldest_date_on_page < target_from:
-                break
-
-            if len(nodes) < 20:
-                break
-
-            page += 1
-        except Exception as exc:
-            metrics.errors.append(f"列表页{page}抓取失败: {exc}")
+    session.trust_env = False
+    try:
+        response = session.get(TARGET_URL, headers=HEADERS, timeout=30)
+        response.raise_for_status()
+        response.encoding = response.apparent_encoding or "utf-8"
+        api, params = _list_api_config(response.text)
+    except Exception as exc:
+        metrics.errors.append(f"列表页抓取失败: {TARGET_URL} - {exc}")
+        return policies, latest_items, metrics
+    seen, signatures = set(), set()
+    for page in range(1, 501):
+        deadline = float(os.getenv("POLICYCLAW_CRAWLER_DEADLINE_EPOCH") or 0)
+        if deadline and time.time() + 35 >= deadline:
+            metrics.errors.append(f"[PAGINATION_INCOMPLETE] 运行预算不足: {api} page={page}")
             break
-
-    metrics.raw_item_count = max(metrics.valid_item_count + metrics.filtered_count + metrics.invalid_item_count, len(latest_items))
+        try:
+            response = session.get(api, params={**params, "pageIndex": page, "pageNumber": page},
+                                   headers=HEADERS, timeout=30)
+            response.raise_for_status()
+            payload = response.json()
+            rows, count = payload.get("rows") or [], int(payload.get("count") or 0)
+            total_pages = int(payload.get("pageCount") or 0)
+            if not isinstance(rows, list) or count < 0 or total_pages < 0:
+                raise ValueError("列表响应结构异常")
+        except Exception as exc:
+            metrics.errors.append(f"列表API抓取失败: {api} page={page} - {exc}")
+            break
+        if not rows:
+            if page == 1 and count == 0:
+                metrics.errors.append(
+                    f"[OFFICIAL_EMPTY_LIST] 官网栏目当前无公开记录: {TARGET_URL}"
+                )
+            if (page - 1) * params["pageSize"] < count:
+                metrics.errors.append(f"[PAGINATION_INCOMPLETE] 提前空页: {api} page={page}")
+            break
+        signature = tuple(str(x.get("DOCPUBURL")) if isinstance(x, dict) else repr(x) for x in rows)
+        if signature in signatures:
+            metrics.errors.append(f"[PAGINATION_INCOMPLETE] 重复页: {api} page={page}")
+            break
+        signatures.add(signature)
+        metrics.raw_item_count += len(rows)
+        page_dates = []
+        for row in rows:
+            try:
+                if (str(row.get("SITEID")) != params["siteId"]
+                        or str(row.get("CHANNELID")) != params["filter[CHANNELID]"]
+                        or str(row.get("GROUPCAT")) != params["filter[GROUPCAT]"]):
+                    metrics.invalid_item_count += 1
+                    metrics.errors.append(f"[CHANNEL_MISMATCH] 接口记录不属于请求栏目: {api} id={row.get('DOCID')}")
+                    continue
+                title = str(row.get("DOCTITLE") or "").strip()
+                href = str(row.get("DOCPUBURL") or "").strip()
+                raw_date = str(row.get("DOCRELTIME") or "")
+                if raw_date.endswith("Z"):
+                    parsed_datetime = datetime.fromisoformat(raw_date.replace("Z", "+00:00"))
+                    if parsed_datetime.tzinfo is not None:
+                        parsed_datetime = parsed_datetime.astimezone(timezone(timedelta(hours=8)))
+                    raw_date = parsed_datetime.date()
+                pub_at = parse_date(raw_date)
+                if not title or not href or not pub_at:
+                    metrics.invalid_item_count += 1
+                    metrics.errors.append(f"列表记录字段缺失或日期无效: {href or api}")
+                    continue
+                page_dates.append(pub_at)
+                url = urldefrag(urljoin(TARGET_URL, href))[0]
+                if url in seen:
+                    metrics.duplicate_policy_count += 1
+                    continue
+                seen.add(url)
+                metrics.valid_item_count += 1
+                latest_items.append({"title": title, "pub_at": pub_at})
+                if not is_target_date(pub_at, target_from, target_to):
+                    metrics.filtered_count += 1
+                    continue
+                policies.append({"title": title, "url": url, "pub_at": pub_at,
+                                 "content": _extract_content(session, url, metrics),
+                                 "selected": False, "category": CATEGORY, "source": SOURCE_NAME})
+            except Exception as exc:
+                metrics.invalid_item_count += 1
+                metrics.errors.append(f"列表记录解析失败: {api} page={page} - {exc}")
+        if page >= total_pages:
+            break
+        # The official API explicitly sorts DOCRELTIME descending. One old pinned item
+        # cannot stop traversal; every record in the page must have a valid older date.
+        if len(page_dates) == len(rows) and max(page_dates) < target_from:
+            break
+    else:
+        metrics.errors.append(f"[PAGINATION_INCOMPLETE] 达到安全页数上限: {api}")
     metrics.target_date_count = len(policies)
-    metrics.empty_content_count = sum(
-        1 for item in policies if not item.get("content")
-    )
-    return policies, latest_items[:5], metrics
+    metrics.empty_content_count = sum(not item.get("content") for item in policies)
+    return policies, sorted(latest_items, key=lambda x: x["pub_at"], reverse=True)[:5], metrics
 
 
 def run():

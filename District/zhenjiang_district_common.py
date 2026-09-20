@@ -87,8 +87,16 @@ def new_session():
 
 
 def fetch_text(session, url, timeout=LIST_TIMEOUT):
-    response = session.get(url, timeout=timeout)
-    response.raise_for_status()
+    try:
+        response = session.get(url, timeout=timeout)
+        response.raise_for_status()
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status:
+            raise RuntimeError(f"HTTP {status}: {url}") from exc
+        if "proxy" in str(exc).lower() or "127.0.0.1:10808" in str(exc):
+            raise RuntimeError(f"代理连接失败（本爬虫已禁用环境代理）: {url} - {exc}") from exc
+        raise RuntimeError(f"网络连接失败: {url} - {exc}") from exc
     response.encoding = "utf-8"
     return response.text
 
@@ -296,10 +304,8 @@ def scrape_channels(source_name, channel_urls, category):
             metrics, policies, latest_items, seen_urls,
         )
         if not list_ok:
-            metrics.errors.append(
-                f"列表页请求失败，跳过后续同站栏目（起于: {channel_url}）"
-            )
-            break
+            metrics.errors.append(f"单栏目抓取失败，已隔离并继续: {channel_url}")
+            continue
 
     for item in policies:
         item["source"] = source_name

@@ -5,11 +5,13 @@
 """
 
 from urllib.parse import urljoin
+from io import BytesIO
 
 import re
 
 import requests
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
 
 from crawler_core import (
     CrawlerMetrics,
@@ -68,6 +70,21 @@ def _extract_content(session, article_url, metrics):
             text = element.get_text("\n", strip=True)
             if text:
                 return text
+        for link in soup.select('a[href$=".pdf"], a[href*="downfile.jsp"]'):
+            pdf_url = urljoin(article_url, link.get("href", ""))
+            try:
+                pdf_response = session.get(pdf_url, headers=HEADERS, timeout=30)
+                pdf_response.raise_for_status()
+                text = "\n".join((page.extract_text() or "").strip() for page in PdfReader(BytesIO(pdf_response.content)).pages).strip()
+                if text:
+                    return text
+            except Exception as exc:
+                metrics.errors.append(f"PDF附件正文提取失败: {pdf_url} - {exc}")
+        desc = soup.select_one('meta[name="Description"], meta[name="description"]')
+        summary = str(desc.get("content") or "").strip() if desc else ""
+        if summary:
+            return summary
+        metrics.errors.append(f"[CONTENT_MISSING] 正文及附件文本均为空: {article_url}")
         return ""
     except Exception as exc:
         metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")

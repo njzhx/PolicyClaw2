@@ -2,10 +2,14 @@ SOURCE_NAME = '江苏省数据局_政策发布'
 
 
 import requests
+from io import BytesIO
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
+from urllib.parse import urljoin
 from datetime import datetime, timedelta, timezone
 
-from crawler_core import extract_content_text, format_date_window, get_crawl_date_window, is_target_date
+from crawler_core import CrawlerMetrics, CrawlerRunResult, extract_content_text, get_crawl_date_window, is_target_date, parse_date
+from db_utils import save_to_policy
 import re
 
 headers = {
@@ -18,14 +22,11 @@ TARGET_URL = "https://jszwb.jiangsu.gov.cn/col/col81698/index.html?number=A00003
 def scrape_data():
     policies = []
     all_items = []
+    metrics = CrawlerMetrics()
     url = TARGET_URL
 
     try:
         target_date_from, target_date_to = get_crawl_date_window()
-        target_date_label = format_date_window(target_date_from, target_date_to)
-
-
-
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -46,6 +47,7 @@ def scrape_data():
 
         if not items:
             items = soup.find_all('li')
+        metrics.raw_item_count = len(items)
         filtered_count = 0
 
         for item in items:
@@ -72,11 +74,14 @@ def scrape_data():
                 date_match = re.search(r'(\d{4})[-/\.](\d{1,2})[-/\.](\d{1,2})', date_text)
                 if date_match:
                     try:
-                        pub_at = datetime.strptime(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}", '%Y-%m-%d').date()
+                        pub_at = parse_date(f"{date_match.group(1)}-{date_match.group(2)}-{date_match.group(3)}")
                     except ValueError:
                         pass
 
-                # 保存到 all_items 用于显示最新5条
+                if not title or not href or not pub_at:
+                    metrics.invalid_item_count += 1
+                    continue
+                metrics.valid_item_count += 1
                 all_items.append({'title': title, 'pub_at': pub_at})
 
                 if not is_target_date(pub_at, target_date_from, target_date_to):
@@ -107,8 +112,25 @@ def scrape_data():
 
                     if content_elem:
                         content = extract_content_text(content_elem)
-                except Exception:
-                    pass
+                    if not content:
+                        attachment = detail_soup.select_one('a[href$=".pdf"], a[href*="downfile.jsp"]')
+                        if attachment:
+                            pdf_url = urljoin(article_url, attachment.get('href', ''))
+                            try:
+                                pdf_resp = requests.get(pdf_url, headers=headers, timeout=30)
+                                pdf_resp.raise_for_status()
+                                content = '\n'.join(
+                                    (page.extract_text() or '').strip()
+                                    for page in PdfReader(BytesIO(pdf_resp.content)).pages
+                                ).strip()
+                            except Exception as exc:
+                                metrics.errors.append(f"PDF附件正文提取失败: {pdf_url} - {exc}")
+                            if not content:
+                                metrics.errors.append(f"[ATTACHMENT_ONLY] PDF附件无可提取文本: {article_url}")
+                        else:
+                            metrics.errors.append(f"[CONTENT_MISSING] 正文为空: {article_url}")
+                except Exception as exc:
+                    metrics.errors.append(f"详情页抓取失败: {article_url} - {exc}")
 
                 policy_data = {
                     'title': title,
@@ -117,49 +139,28 @@ def scrape_data():
                     'content': content,
                     'selected': False,
                     'category': '江苏省本级',
-                    'source': '江苏省数据局政策发布'
+                    'source': SOURCE_NAME
                 }
                 policies.append(policy_data)
 
-            except Exception:
-                continue
-
-        print(f"✅ 江苏省数据局政策发布爬虫：成功抓取 {len(policies)} 条目标日期窗口数据")
-        print(f"⏭️  过滤掉 {filtered_count} 条非目标日期的数据")
-
-        # 显示页面最新5条
-        if all_items:
-            print("📊 页面最新5条是：")
-            for i, item in enumerate(all_items[:5], 1):
-                date_str = item['pub_at'].strftime('%Y-%m-%d') if item['pub_at'] else '未知日期'
-                print(f"✅ {item['title']} {date_str}")
+            except Exception as exc:
+                metrics.invalid_item_count += 1
+                metrics.errors.append(f"列表记录解析失败: {exc}")
 
     except Exception as e:
-        print(f"❌ 江苏省数据局政策发布爬虫：抓取失败 - {e}")
-        print("----------------------------------------")
+        metrics.errors.append(f"列表页抓取失败: {TARGET_URL} - {e}")
 
-    return policies, all_items
-
-
-def save_to_supabase(data_list):
-    try:
-        from db_utils import save_to_policy
-        return save_to_policy(data_list, "江苏省数据局_政策发布")
-    except Exception:
-        return data_list
+    metrics.filtered_count = filtered_count if 'filtered_count' in locals() else 0
+    metrics.target_date_count = len(policies)
+    metrics.empty_content_count = sum(not item.get('content') for item in policies)
+    return policies, all_items[:5], metrics
 
 
 def run():
-    try:
-        data, _ = scrape_data()
-        result = save_to_supabase(data)
-        print(f"💾 写入数据库: {len(data)} 条")
-        print("----------------------------------------")
-        return result
-    except Exception as e:
-        print(f"❌ 江苏省数据局政策发布爬虫：运行失败 - {e}")
-        print("----------------------------------------")
-        return []
+    data, latest_items, metrics = scrape_data()
+    processed_items, api_push_result = save_to_policy(data, SOURCE_NAME)
+    return CrawlerRunResult(items=processed_items, latest_items=latest_items,
+                            metrics=metrics, api_push_result=api_push_result)
 
 
 if __name__ == "__main__":

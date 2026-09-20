@@ -24,13 +24,13 @@ from crawler_core import (
 from db_utils import save_to_policy
 
 
-TARGET_URL = "https://www.yancheng.gov.cn/col/col831/index.html"
+TARGET_URL = "https://www.yancheng.gov.cn/col/col831/index.html?number=A00002A00001"
 SOURCE_NAME = "盐城市数据局_政府信息公开"
 CATEGORY = "盐城"
 BASE_URL = "https://www.yancheng.gov.cn"
 SEARCH_URL = "https://www.yancheng.gov.cn/module/xxgk/search.jsp"
 # 页面 URL 中的 number 参数对应组配分类 infotypeId；无分类过滤时留空
-INFOTYPE_ID = ""
+INFOTYPE_ID = "A00002A00001"
 
 HEADERS = {
     "User-Agent": (

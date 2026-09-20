@@ -14,11 +14,11 @@ except ImportError:  # pragma: no cover - 兼容直接运行
     from huaian_common import scrape_xxgk_site
 
 
-TARGET_URL = "https://ylbzj.huaian.gov.cn/cmsweb/zwgk/sj/indexdept.html?r=0000000064a8f16d0164ad1d9d730006&orgId=2c94939268fffddd016900c3b2a00073&orgName=%E6%B7%AE%E5%AE%89%E5%B8%82%E5%8C%BB%E7%96%97%E4%BF%9D%E9%9A%9C%E5%B1%80&topic=231"
+TARGET_URL = "https://ylbzj.huaian.gov.cn/cmsweb/zwgk/sj/indexdept.html?r=0000000064a8f16d0164ad1d9d730006&orgId=2c94939268fffddd016900c3b2a00073&orgName=%E6%B7%AE%E5%AE%89%E5%B8%82%E5%8C%BB%E7%96%97%E4%BF%9D%E9%9A%9C%E5%B1%80&topic=240"
 SOURCE_NAME = "淮安市医疗保障局_政策法规"
 CATEGORY = "淮安"
 API_HOST = "https://ylbzj.huaian.gov.cn"
-TOPIC = "231"
+TOPIC = "240"
 DEPTID = "2c94939268fffddd016900c3b2a00073"
 RDEPTID = ""
 

@@ -216,9 +216,9 @@ def _extract_content(session, article_url, metrics):
 
 
 
-def _fetch_page(session, url, metrics):
+def _fetch_page(session, url, metrics, headers=None):
     try:
-        response = session.get(url, headers=HEADERS, timeout=30)
+        response = session.get(url, headers=headers or HEADERS, timeout=30)
         response.raise_for_status()
         response.encoding = response.apparent_encoding or "utf-8"
         return BeautifulSoup(response.content, "html.parser")
@@ -233,6 +233,7 @@ def scrape_data():
     metrics = CrawlerMetrics()
     target_from, target_to = get_crawl_date_window()
     session = requests.Session()
+    session.trust_env = False
 
     iframe_src = _extract_iframe_src(session, metrics)
     if iframe_src:
@@ -241,7 +242,7 @@ def scrape_data():
         page = 1
         while page <= 100:
             page_url = _build_page_url(iframe_src, page)
-            soup = _fetch_page(session, page_url, metrics)
+            soup = _fetch_page(session, page_url, metrics, headers=iframe_headers)
             if not soup:
                 break
             items = _parse_table_rows(soup)

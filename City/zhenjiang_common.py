@@ -63,12 +63,19 @@ CONTENT_SELECTORS = (
 def new_session():
     session = CrawlerSession()
     session.headers.update(HEADERS)
+    session.trust_env = False
     return session
 
 
 def fetch_text(session, url, timeout=LIST_TIMEOUT):
-    response = session.get(url, timeout=timeout)
-    response.raise_for_status()
+    try:
+        response = session.get(url, timeout=timeout)
+        response.raise_for_status()
+    except Exception as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status:
+            raise RuntimeError(f"HTTP {status}: {url}") from exc
+        raise RuntimeError(f"网络连接失败: {url} - {exc}") from exc
     response.encoding = "utf-8"
     return response.text
 
