@@ -4,7 +4,7 @@
 页面机制：汉风 jpage 系统，列表数据内嵌在 <script type="text/xml"> 的 datastore 中，
           翻页通过 /module/web/jpage/dataproxy.jsp 接口（参数从首页动态提取）。
 记录格式：<li><a href="..." title="...">标题</a>[YYYY-MM-DD]</li>
-详情页正文：#zoom
+详情页正文：div[id^="barrierfree"] > div.mBox > div.content_main.lst_bx > div.detailcontent.mht600 > div[aria-label="正文区"]
 """
 import re
 import time
@@ -110,14 +110,19 @@ def _extract_content(session, article_url, metrics):
         html = ""
         for _ in range(2):
             html = _fetch(session, article_url, timeout=DETAIL_TIMEOUT)
-            if len(html) >= 2000 or "zoom" in html:
+            if len(html) >= 2000 or "正文区" in html or "barrierfree" in html:
                 break
             time.sleep(1)
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup.find_all(["script", "style", "noscript"]):
             tag.decompose()
         content_elem = (
-            soup.select_one("#zoom")
+            soup.select_one('div[id^="barrierfree"] div.detailcontent.mht600')
+            or soup.select_one("div.detailcontent.mht600")
+            or soup.select_one('div[id^="barrierfree"] div[aria-label="正文区"]')
+            or soup.select_one('div[aria-label="正文区"]')
+            or soup.select_one("div.detailcontent")
+            or soup.select_one("#zoom")
             or soup.select_one(".zoom")
             or soup.select_one("#zoomcon")
             or soup.select_one("div.article")
