@@ -99,6 +99,7 @@ class CrawlerMetrics:
     duplicate_policy_count: int = 0
     saved_count: int = 0
     api_push_failed_count: int = 0
+    policyintel_sync_failed_count: int = 0
     errors: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -112,6 +113,7 @@ class CrawlerMetrics:
             "duplicate_policy_count": self.duplicate_policy_count,
             "saved_count": self.saved_count,
             "api_push_failed_count": self.api_push_failed_count,
+            "policyintel_sync_failed_count": self.policyintel_sync_failed_count,
             "errors": self.errors,
         }
 
@@ -125,6 +127,7 @@ class CrawlerRunResult:
     metrics: Any = field(default_factory=CrawlerMetrics)
     storage_result: Optional[Dict[str, Any]] = None
     api_push_result: Optional[Dict[str, Any]] = None
+    policyintel_result: Optional[Dict[str, Any]] = None
 
 
 def beijing_now() -> datetime:
@@ -472,6 +475,7 @@ def extract_storage_result_from_output(output: str, item_count: int = 0) -> Dict
 def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict[str, Any]:
     api_push_result = None
     storage_result = None
+    policyintel_result = None
     latest_items = []
     data_list = []
 
@@ -483,6 +487,7 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
         metrics = CrawlerMetrics(**{k: v for k, v in metric_values.items() if k in metric_fields})
         storage_result = result.storage_result
         api_push_result = result.api_push_result
+        policyintel_result = result.policyintel_result
     elif isinstance(result, dict) and "items" in result:
         items = result.get("items") or []
         latest_items = result.get("latest_items") or []
@@ -492,6 +497,7 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
         )
         storage_result = result.get("storage_result")
         api_push_result = result.get("api_push_result")
+        policyintel_result = result.get("policyintel_result")
     elif isinstance(result, tuple) and len(result) == 2:
         data_list, api_push_result = result
         items = data_list or []
@@ -508,6 +514,23 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
         storage_result = getattr(result.items, "storage_result", None)
     if storage_result is None and isinstance(result, dict):
         storage_result = getattr(result.get("items"), "storage_result", None)
+
+    if policyintel_result is None:
+        policyintel_result = getattr(items, "policyintel_result", None)
+    if policyintel_result is None and data_list is not None:
+        policyintel_result = getattr(data_list, "policyintel_result", None)
+    if policyintel_result is None and isinstance(result, CrawlerRunResult):
+        policyintel_result = getattr(
+            result.items,
+            "policyintel_result",
+            None,
+        )
+    if policyintel_result is None and isinstance(result, dict):
+        policyintel_result = getattr(
+            result.get("items"),
+            "policyintel_result",
+            None,
+        )
 
     if (
         output
@@ -577,6 +600,11 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
 
     if isinstance(api_push_result, dict) and api_push_result.get("status") == "error":
         metrics.api_push_failed_count += 1
+    if (
+        isinstance(policyintel_result, dict)
+        and policyintel_result.get("status") in {"partial", "error"}
+    ):
+        metrics.policyintel_sync_failed_count += 1
 
     return {
         "items": normalized_items,
@@ -584,4 +612,5 @@ def adapt_legacy_result(result: Any, output: str, source_name: str = "") -> Dict
         "metrics": metrics.to_dict(),
         "storage_result": storage_result,
         "api_push_result": api_push_result,
+        "policyintel_result": policyintel_result,
     }

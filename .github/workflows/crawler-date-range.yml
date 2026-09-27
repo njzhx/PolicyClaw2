@@ -21,6 +21,11 @@ on:
         required: false
         default: true
         type: boolean
+      enable_policyintel_sync:
+        description: '是否写入 PolicyIntel'
+        required: false
+        default: true
+        type: boolean
       enable_api_push:
         description: '是否推送 API'
         required: false
@@ -56,6 +61,7 @@ jobs:
       crawl_date_to: ${{ inputs.crawl_date_to }}
       crawler_files: ${{ inputs.crawler_files }}
       enable_supabase_write: ${{ inputs.enable_supabase_write }}
+      enable_policyintel_sync: ${{ inputs.enable_policyintel_sync }}
       enable_api_push: ${{ inputs.enable_api_push }}
       enable_feishu_notify: ${{ inputs.enable_feishu_notify }}
       verbose_crawler_log: ${{ inputs.verbose_crawler_log }}

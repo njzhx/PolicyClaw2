@@ -37,6 +37,11 @@ on:
         required: false
         default: true
         type: boolean
+      enable_policyintel_sync:
+        description: '是否写入 PolicyIntel'
+        required: false
+        default: false
+        type: boolean
       enable_api_push:
         description: '是否推送 API'
         required: false
@@ -68,6 +73,12 @@ on:
       SUPABASE_SECRET_KEY:
         required: false
       FEISHU_BOT_WEBHOOK:
+        required: false
+      VPS_IP:
+        required: false
+      CRAWLER_API_KEY:
+        required: false
+      POLICYINTEL_API_BASE_URL:
         required: false
 
 jobs:
@@ -270,6 +281,9 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_TABLE: policyclaw2
           VPS_IP: ${{ secrets.VPS_IP }}
+          CRAWLER_API_KEY: ${{ secrets.CRAWLER_API_KEY }}
+          POLICYINTEL_API_BASE_URL: ${{ secrets.POLICYINTEL_API_BASE_URL }}
+          POLICYINTEL_SYNC_ENABLED: ${{ inputs.enable_policyintel_sync && '1' || '0' }}
           FEISHU_BOT_WEBHOOK: ${{ secrets.FEISHU_BOT_WEBHOOK }}
           POLICYCLAW_ENABLE_SUPABASE_WRITE: ${{ inputs.enable_supabase_write && '1' || '0' }}
           POLICYCLAW_ENABLE_API_PUSH: ${{ inputs.enable_api_push && '1' || '0' }}

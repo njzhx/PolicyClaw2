@@ -1,8 +1,10 @@
 import os
 import json
+import time
 import requests
 from supabase import create_client, Client
 from datetime import datetime, timezone, timedelta
+from email.utils import parsedate_to_datetime
 
 from crawler_core import (
     api_push_enabled,
@@ -29,10 +31,30 @@ POLICY_TABLE_FIELDS = (
 )
 
 UPSERT_BATCH_SIZE = 100
+POLICYINTEL_MAX_BATCH_ITEMS = 100
+POLICYINTEL_MAX_REQUEST_BYTES = 1536 * 1024
 CRAWLER_RUN_TABLE = "crawler_run_records"
 
 _storage_capture_active = False
 _storage_capture_results = []
+
+
+def _retry_after_seconds(response, default=5.0, maximum=60.0):
+    """解析 429 Retry-After，限制等待时间以避免异常响应长期阻塞。"""
+    raw_value = (response.headers.get("Retry-After") or "").strip()
+    if not raw_value:
+        return default
+    try:
+        seconds = float(raw_value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(raw_value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            seconds = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return default
+    return min(max(seconds, 0.5), maximum)
 
 
 def begin_storage_capture():
@@ -51,11 +73,16 @@ def consume_storage_results():
     return results
 
 
-def _record_storage_result(source_name, storage_result):
-    if _storage_capture_active and isinstance(storage_result, dict):
-        _storage_capture_results.append(
-            {"source_name": source_name, "storage_result": dict(storage_result)}
-        )
+def _record_storage_result(source_name, storage_result, policyintel_result=None):
+    if not _storage_capture_active:
+        return
+    entry = {"source_name": source_name}
+    if isinstance(storage_result, dict):
+        entry["storage_result"] = dict(storage_result)
+    if isinstance(policyintel_result, dict):
+        entry["policyintel_result"] = dict(policyintel_result)
+    if len(entry) > 1:
+        _storage_capture_results.append(entry)
 
 
 def aggregate_storage_results(captured_results):
@@ -118,17 +145,96 @@ def aggregate_storage_results(captured_results):
     }
 
 
-class PolicySaveItems(list):
-    """保留现有列表接口，同时携带结构化 Supabase 写入统计。"""
+def aggregate_policyintel_results(captured_results):
+    """汇总一个爬虫内一次或多次 save_to_policy() 的 PolicyIntel 同步统计。"""
+    results = [
+        entry.get("policyintel_result")
+        for entry in (captured_results or [])
+        if isinstance(entry, dict)
+        and isinstance(entry.get("policyintel_result"), dict)
+    ]
+    if not results:
+        return None
+    if len(results) == 1:
+        return dict(results[0])
 
-    def __init__(self, items=(), storage_result=None):
+    attempted = [
+        result for result in results
+        if result.get("status") in {"success", "partial", "error"}
+    ]
+    inserted_count = sum(int(result.get("inserted_count") or 0) for result in attempted)
+    skipped_count = sum(int(result.get("skipped_count") or 0) for result in attempted)
+    invalid_count = sum(int(result.get("invalid_count") or 0) for result in attempted)
+    failed_count = sum(int(result.get("failed_count") or 0) for result in attempted)
+    total_received = sum(int(result.get("total_received") or 0) for result in attempted)
+    retry_count = sum(int(result.get("retry_count") or 0) for result in attempted)
+    errors = [
+        str(error)
+        for result in attempted
+        for error in (result.get("errors") or [])
+    ][:10]
+
+    if attempted and all(result.get("status") == "error" for result in attempted):
+        status = "error"
+    elif any(result.get("status") in {"partial", "error"} for result in attempted):
+        status = "partial"
+    elif attempted:
+        status = "success"
+    else:
+        status = "skipped"
+
+    if status == "skipped":
+        messages = [str(result.get("message") or "") for result in results]
+        message = next((value for value in messages if value), "PolicyIntel 同步已跳过")
+    else:
+        message = (
+            f"PolicyIntel 同步完成：新增 {inserted_count} 条，"
+            f"跳过已存在 {skipped_count} 条"
+        )
+        if invalid_count:
+            message += f"，无效 {invalid_count} 条"
+        if failed_count:
+            message += f"，失败 {failed_count} 条"
+        if retry_count:
+            message += f"，重试 {retry_count} 次"
+
+    return {
+        "status": status,
+        "saved_count": inserted_count + skipped_count,
+        "inserted_count": inserted_count,
+        "skipped_count": skipped_count,
+        "invalid_count": invalid_count,
+        "failed_count": failed_count,
+        "total_received": total_received,
+        "counts_verified": bool(attempted),
+        "retry_count": retry_count,
+        "message": message,
+        "errors": errors,
+    }
+
+
+class PolicySaveItems(list):
+    """保留现有列表接口，同时携带结构化外部写入统计。"""
+
+    def __init__(self, items=(), storage_result=None, policyintel_result=None):
         super().__init__(items)
         self.storage_result = storage_result
+        self.policyintel_result = policyintel_result
 
 
-def _save_return(source_name, items, storage_result, api_push_result):
-    _record_storage_result(source_name, storage_result)
-    return PolicySaveItems(items, storage_result), api_push_result
+def _save_return(
+    source_name,
+    items,
+    storage_result,
+    api_push_result,
+    policyintel_result=None,
+):
+    _record_storage_result(source_name, storage_result, policyintel_result)
+    return PolicySaveItems(
+        items,
+        storage_result,
+        policyintel_result,
+    ), api_push_result
 
 
 class DBUtils:
@@ -163,12 +269,35 @@ class DBUtils:
 
     def save_crawler_run(self, record):
         """Persist one crawler health result independently from policy writes."""
+        # 同步写入 PolicyIntel (VPS Postgres) 监控表
+        try:
+            policyintel_result = self.push_crawler_run_to_policyintel(record)
+        except Exception as exc:
+            policyintel_result = {
+                "status": "error",
+                "message": f"PolicyIntel 运行记录同步异常: {exc}",
+                "attempts": 0,
+                "status_code": None,
+                "errors": [str(exc)],
+            }
+
+        def with_policyintel_result(supabase_result):
+            """保持 Supabase 顶层返回约定，仅附加独立的 PolicyIntel 结果。"""
+            return {
+                **supabase_result,
+                "policyintel_result": policyintel_result,
+            }
+
         if not self.supabase_url or not self.supabase_key:
-            return {"status": "skipped", "message": "Supabase credentials are not configured"}
+            return with_policyintel_result(
+                {"status": "skipped", "message": "Supabase credentials are not configured"}
+            )
         if os.getenv("POLICYCLAW_ENABLE_RUN_RECORDS", "1").strip().lower() in {
             "0", "false", "no", "off"
         }:
-            return {"status": "skipped", "message": "Crawler run recording is disabled"}
+            return with_policyintel_result(
+                {"status": "skipped", "message": "Crawler run recording is disabled"}
+            )
 
         try:
             response = (
@@ -177,9 +306,13 @@ class DBUtils:
                 .upsert(record, on_conflict="run_id,crawler_key")
                 .execute()
             )
-            return {"status": "success", "data": response.data}
+            return with_policyintel_result(
+                {"status": "success", "data": response.data}
+            )
         except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+            return with_policyintel_result(
+                {"status": "error", "message": str(exc)}
+            )
 
     def process_data(self, data_list, source_name=""):
         """处理数据，准备写入数据库
@@ -219,6 +352,69 @@ class DBUtils:
     def iter_batches(items, batch_size=UPSERT_BATCH_SIZE):
         for index in range(0, len(items), batch_size):
             yield items[index:index + batch_size]
+
+    @staticmethod
+    def _policyintel_payload(source_name, items):
+        return {
+            "sources": [
+                {
+                    "name": source_name,
+                    "category": (
+                        items[0].get("category", "") if items else ""
+                    ),
+                    "items": items,
+                }
+            ]
+        }
+
+    @classmethod
+    def _encode_policyintel_payload(cls, source_name, items):
+        return json.dumps(
+            cls._policyintel_payload(source_name, items),
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+    @classmethod
+    def iter_policyintel_batches(cls, items, source_name):
+        """按条数和实际 UTF-8 请求体大小切分 PolicyIntel 批次。"""
+        batch = []
+        for item in items:
+            candidate = batch + [item]
+            candidate_body = cls._encode_policyintel_payload(
+                source_name,
+                candidate,
+            )
+            if (
+                len(candidate) <= POLICYINTEL_MAX_BATCH_ITEMS
+                and len(candidate_body) <= POLICYINTEL_MAX_REQUEST_BYTES
+            ):
+                batch = candidate
+                continue
+
+            if batch:
+                yield batch, cls._encode_policyintel_payload(
+                    source_name,
+                    batch,
+                )
+                batch = []
+
+            single_body = cls._encode_policyintel_payload(
+                source_name,
+                [item],
+            )
+            if len(single_body) > POLICYINTEL_MAX_REQUEST_BYTES:
+                yield None, {
+                    "item": item,
+                    "payload_bytes": len(single_body),
+                }
+            else:
+                batch = [item]
+
+        if batch:
+            yield batch, cls._encode_policyintel_payload(
+                source_name,
+                batch,
+            )
 
     def get_existing_policy_keys(self, supabase, policy_keys):
         """返回 Supabase 当前已存在的 policy_key 集合。"""
@@ -399,8 +595,34 @@ class DBUtils:
                     "设置 POLICYCLAW_ENABLE_API_PUSH=1 后才会推送。"
                 )
 
+            # 独立推送到 PolicyIntel 新系统 (数据字段与 Supabase 保持 100% 严格一致)
+            policyintel_result = None
+            try:
+                policyintel_result = self.push_to_policyintel(
+                    processed_data,
+                    source_name,
+                )
+            except Exception as pi_err:
+                print(f"⚠️ PolicyIntel 推送异常 ({source_name}): {pi_err}")
+                policyintel_result = {
+                    "status": "error",
+                    "saved_count": 0,
+                    "inserted_count": 0,
+                    "skipped_count": 0,
+                    "invalid_count": 0,
+                    "failed_count": len(processed_data),
+                    "total_received": len(processed_data),
+                    "counts_verified": False,
+                    "message": f"PolicyIntel 推送异常: {pi_err}",
+                    "errors": [str(pi_err)],
+                }
+
             return _save_return(
-                source_name, processed_data, storage_result, api_push_result
+                source_name,
+                processed_data,
+                storage_result,
+                api_push_result,
+                policyintel_result,
             )
 
         except Exception as e:
@@ -567,6 +789,350 @@ class DBUtils:
             message = f"推送过程中发生未知错误 - {e}"
             print(f"❌ {message}")
             return {"status": "error", "message": message}
+
+    def push_to_policyintel(self, data_list, source_name):
+        """将数据同步推送到 PolicyIntel (VPS Postgres) 系统，数据字段与 Supabase 保持 100% 严格一致"""
+        if not data_list:
+            return {"status": "skipped", "message": "没有数据需要推送"}
+
+        if os.getenv("POLICYINTEL_SYNC_ENABLED", "0").strip().lower() in {"0", "false", "no", "off"}:
+            return {"status": "skipped", "message": "PolicyIntel 同步开关未开启"}
+
+        api_base = os.getenv("POLICYINTEL_API_BASE_URL", "").strip().rstrip("/")
+        if not api_base:
+            vps_ip = os.getenv("VPS_IP", "").strip()
+            if vps_ip:
+                # 默认走 Nginx 5173 代理端口或直接配置的端口
+                vps_port = os.getenv("POLICYINTEL_PORT", "5173").strip()
+                api_base = f"http://{vps_ip}:{vps_port}/api" if vps_port else f"http://{vps_ip}/api"
+
+        if not api_base:
+            return {"status": "skipped", "message": "未配置 POLICYINTEL_API_BASE_URL 或 VPS_IP，跳过 PolicyIntel 同步"}
+
+        target_url = f"{api_base}/receive-data"
+        api_key = os.getenv("CRAWLER_API_KEY", "").strip()
+        if not api_key:
+            message = "未配置 CRAWLER_API_KEY，跳过 PolicyIntel 同步"
+            print(f"⚠️  [PolicyIntel Sync] {message}")
+            return {"status": "skipped", "message": message}
+
+        items = []
+        for item in data_list:
+            # 严格调用 to_database_item，确保字段与写入 Supabase 的完全一致。
+            db_item = self.to_database_item(item)
+            items.append({
+                "title": db_item.get("title", ""),
+                "url": db_item.get("url", ""),
+                "pub_at": db_item.get("pub_at", ""),
+                "content": db_item.get("content", ""),
+                "selected": bool(db_item.get("selected", False)),
+                "category": db_item.get("category", ""),
+                "source": db_item.get("source", "") or source_name,
+                "policy_key": db_item.get("policy_key", ""),
+            })
+
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "x-api-key": api_key,
+        }
+        inserted_count = 0
+        skipped_count = 0
+        invalid_count = 0
+        failed_count = 0
+        errors = []
+        counts_verified = True
+        received_non_success = False
+        retry_count = 0
+        max_attempts = 3
+        transient_statuses = {408, 425, 429}
+
+        for batch_index, (batch_items, batch_body) in enumerate(
+            self.iter_policyintel_batches(items, source_name),
+            start=1,
+        ):
+            if batch_items is None:
+                failed_count += 1
+                received_non_success = True
+                oversized_item = batch_body["item"]
+                errors.append(
+                    "单条政策请求体超过 PolicyIntel 1.5 MiB 安全上限，"
+                    "未截断正文且未发送: "
+                    f"{oversized_item.get('title') or oversized_item.get('policy_key')} "
+                    f"({batch_body['payload_bytes']} bytes)"
+                )
+                continue
+            batch_result = None
+            request_error = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = requests.post(
+                        target_url,
+                        data=batch_body,
+                        headers=headers,
+                        timeout=15,
+                        proxies=(
+                            {"http": None, "https": None}
+                            if os.name == "nt" else None
+                        ),
+                    )
+                except requests.exceptions.RequestException as exc:
+                    request_error = str(exc)
+                    if attempt < max_attempts:
+                        retry_count += 1
+                        time.sleep(0.5 * attempt)
+                        continue
+                    break
+                except Exception as exc:
+                    request_error = str(exc)
+                    break
+
+                status_code = response.status_code
+                if not 200 <= status_code <= 299:
+                    detail = (response.text or "").strip()[:300]
+                    request_error = f"HTTP {status_code}"
+                    if detail:
+                        request_error += f": {detail}"
+                    is_transient = (
+                        status_code in transient_statuses
+                        or 500 <= status_code <= 599
+                    )
+                    if is_transient and attempt < max_attempts:
+                        retry_count += 1
+                        retry_delay = (
+                            _retry_after_seconds(response)
+                            if status_code == 429
+                            else 0.5 * attempt
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    break
+
+                try:
+                    batch_result = response.json()
+                except ValueError as exc:
+                    request_error = f"响应不是有效 JSON: {exc}"
+                break
+
+            if batch_result is None:
+                counts_verified = False
+                received_non_success = True
+                failed_count += len(batch_items)
+                errors.append(
+                    f"批次 {batch_index} 请求失败: "
+                    f"{request_error or '未知错误'}"
+                )
+                continue
+
+            try:
+                batch_status = batch_result.get("status") or "unknown"
+                if batch_status in {"partial", "error"}:
+                    received_non_success = True
+                batch_inserted = int(batch_result.get("inserted_count") or 0)
+                batch_skipped = int(batch_result.get("skipped_count") or 0)
+                batch_invalid = int(batch_result.get("invalid_count") or 0)
+                batch_failed = int(batch_result.get("failed_count") or 0)
+                accounted_count = (
+                    batch_inserted
+                    + batch_skipped
+                    + batch_invalid
+                    + batch_failed
+                )
+                if accounted_count != len(batch_items):
+                    counts_verified = False
+                    received_non_success = True
+                    if accounted_count < len(batch_items):
+                        batch_failed += len(batch_items) - accounted_count
+                    errors.append(
+                        f"批次 {batch_index} 计数不一致: "
+                        f"发送 {len(batch_items)} 条，服务端统计 {accounted_count} 条"
+                    )
+                inserted_count += batch_inserted
+                skipped_count += batch_skipped
+                invalid_count += batch_invalid
+                failed_count += batch_failed
+                errors.extend(
+                    f"批次 {batch_index}: {error}"
+                    for error in (batch_result.get("errors") or [])
+                )
+            except Exception as exc:
+                counts_verified = False
+                received_non_success = True
+                failed_count += len(batch_items)
+                errors.append(f"批次 {batch_index} 请求失败: {exc}")
+
+        saved_count = inserted_count + skipped_count
+        if received_non_success or failed_count or invalid_count:
+            status = "partial" if saved_count else "error"
+        else:
+            status = "success"
+
+        message = (
+            f"PolicyIntel 同步完成：新增 {inserted_count} 条，"
+            f"跳过已存在 {skipped_count} 条"
+        )
+        if invalid_count:
+            message += f"，无效 {invalid_count} 条"
+        if failed_count:
+            message += f"，失败 {failed_count} 条"
+        if retry_count:
+            message += f"，重试 {retry_count} 次"
+
+        result = {
+            "status": status,
+            "saved_count": saved_count,
+            "inserted_count": inserted_count,
+            "skipped_count": skipped_count,
+            "invalid_count": invalid_count,
+            "failed_count": failed_count,
+            "total_received": len(items),
+            "counts_verified": counts_verified,
+            "retry_count": retry_count,
+            "message": message,
+            "errors": errors[:10],
+        }
+        if status == "success":
+            print(f"[PolicyIntel Sync OK] {source_name}: {message}")
+        else:
+            print(f"[PolicyIntel Sync {status.upper()}] {source_name}: {message}")
+        return result
+
+    def push_crawler_run_to_policyintel(self, record):
+        """同步推送单次爬虫运行记录到 PolicyIntel API"""
+        if os.getenv("POLICYINTEL_SYNC_ENABLED", "0").strip().lower() in {"0", "false", "no", "off"}:
+            return {
+                "status": "skipped",
+                "message": "PolicyIntel 同步开关未开启",
+                "attempts": 0,
+                "status_code": None,
+                "errors": [],
+            }
+        api_base = os.getenv("POLICYINTEL_API_BASE_URL", "").strip().rstrip("/")
+        if not api_base:
+            vps_ip = os.getenv("VPS_IP", "").strip()
+            if vps_ip:
+                vps_port = os.getenv("POLICYINTEL_PORT", "5173").strip()
+                api_base = f"http://{vps_ip}:{vps_port}/api" if vps_port else f"http://{vps_ip}/api"
+        if not api_base:
+            return {
+                "status": "skipped",
+                "message": "未配置 POLICYINTEL_API_BASE_URL 或 VPS_IP",
+                "attempts": 0,
+                "status_code": None,
+                "errors": [],
+            }
+
+        target_url = f"{api_base}/crawler/runs"
+        api_key = os.getenv("CRAWLER_API_KEY", "").strip()
+        if not api_key:
+            return {
+                "status": "skipped",
+                "message": "未配置 CRAWLER_API_KEY",
+                "attempts": 0,
+                "status_code": None,
+                "errors": [],
+            }
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "x-api-key": api_key,
+        }
+        max_attempts = 3
+        transient_statuses = {408, 425, 429}
+        errors = []
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = requests.post(
+                    target_url,
+                    json=record,
+                    headers=headers,
+                    timeout=10,
+                    proxies={"http": None, "https": None} if os.name == "nt" else None,
+                )
+                status_code = response.status_code
+                is_transient = (
+                    status_code in transient_statuses
+                    or 500 <= status_code <= 599
+                )
+                if not 200 <= status_code <= 299:
+                    detail = (response.text or "").strip()[:300]
+                    error = f"HTTP {status_code}"
+                    if detail:
+                        error += f": {detail}"
+                    errors.append(error)
+                    if is_transient and attempt < max_attempts:
+                        retry_delay = (
+                            _retry_after_seconds(response)
+                            if status_code == 429
+                            else 0.5 * attempt
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    result = {
+                        "status": "error",
+                        "message": f"PolicyIntel 运行记录同步失败: {error}",
+                        "attempts": attempt,
+                        "status_code": status_code,
+                        "errors": errors,
+                    }
+                    print(f"[PolicyIntel Run Sync ERROR] {result['message']}")
+                    return result
+
+                try:
+                    response_data = response.json()
+                except ValueError as exc:
+                    error = f"响应不是有效 JSON: {exc}"
+                    result = {
+                        "status": "error",
+                        "message": f"PolicyIntel 运行记录同步失败: {error}",
+                        "attempts": attempt,
+                        "status_code": status_code,
+                        "errors": errors + [error],
+                    }
+                    print(f"[PolicyIntel Run Sync ERROR] {result['message']}")
+                    return result
+
+                if response_data.get("success") is not True:
+                    error = str(
+                        response_data.get("message")
+                        or "服务端未确认写入成功"
+                    )
+                    result = {
+                        "status": "error",
+                        "message": f"PolicyIntel 运行记录同步失败: {error}",
+                        "attempts": attempt,
+                        "status_code": status_code,
+                        "errors": errors + [error],
+                    }
+                    print(f"[PolicyIntel Run Sync ERROR] {result['message']}")
+                    return result
+
+                result = {
+                    "status": "success",
+                    "message": str(
+                        response_data.get("message")
+                        or "PolicyIntel 运行记录同步成功"
+                    ),
+                    "attempts": attempt,
+                    "status_code": status_code,
+                    "errors": errors,
+                }
+                print(f"[PolicyIntel Run Sync OK] {result['message']}")
+                return result
+            except requests.exceptions.RequestException as exc:
+                error = str(exc)
+                errors.append(error)
+                if attempt < max_attempts:
+                    time.sleep(0.5 * attempt)
+                    continue
+                result = {
+                    "status": "error",
+                    "message": f"PolicyIntel 运行记录同步失败: {error}",
+                    "attempts": attempt,
+                    "status_code": None,
+                    "errors": errors,
+                }
+                print(f"[PolicyIntel Run Sync ERROR] {result['message']}")
+                return result
 
 # 创建全局实例
 db_utils = DBUtils()

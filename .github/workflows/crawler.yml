@@ -20,6 +20,11 @@ on:
         required: false
         default: true
         type: boolean
+      enable_policyintel_sync:
+        description: '是否写入 PolicyIntel'
+        required: false
+        default: true
+        type: boolean
       enable_api_push:
         description: '是否推送 API'
         required: false
@@ -54,6 +59,7 @@ jobs:
       crawl_window_days: ${{ inputs.crawl_window_days || '7' }}
       crawler_files: ${{ inputs.crawler_files || '' }}
       enable_supabase_write: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_supabase_write }}
+      enable_policyintel_sync: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_policyintel_sync }}
       enable_api_push: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_api_push }}
       enable_feishu_notify: ${{ github.event_name != 'workflow_dispatch' || inputs.enable_feishu_notify }}
       verbose_crawler_log: ${{ inputs.verbose_crawler_log || false }}

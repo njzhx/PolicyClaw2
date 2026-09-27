@@ -23,6 +23,7 @@ from crawler_core import (
     get_crawl_date_window,
 )
 from db_utils import (
+    aggregate_policyintel_results,
     aggregate_storage_results,
     begin_storage_capture,
     consume_storage_results,
@@ -201,6 +202,7 @@ class CrawlerManager:
                 payload.get("result"),
                 payload.get("output", ""),
                 aggregate_storage_results(payload.get("storage_results")),
+                aggregate_policyintel_results(payload.get("storage_results")),
             )
         finally:
             try:
@@ -424,6 +426,7 @@ class CrawlerManager:
         latest_items = result.get("latest_items") or []
         storage_result = result.get("storage_result") or {}
         api_result = result.get("api_push_result")
+        policyintel_result = result.get("policyintel_result")
 
         if result.get("status") == "success" and result.get("health_status") != "error":
             print(f"✅ {name}爬虫：成功抓取 {result.get('crawl_count', 0)} 条目标日期数据")
@@ -471,6 +474,21 @@ class CrawlerManager:
         else:
             print(f"⚠️  {name}：没有 API 推送记录")
 
+        if isinstance(policyintel_result, dict):
+            policyintel_status = policyintel_result.get("status")
+            policyintel_message = (
+                policyintel_result.get("message")
+                or "未获得 PolicyIntel 同步详情"
+            )
+            if policyintel_status == "success":
+                print(f"✅ {name}：{policyintel_message}")
+            elif policyintel_status in {"dry_run", "skipped"}:
+                print(f"🧪 {name}：{policyintel_message}")
+            else:
+                print(f"❌ {name}：{policyintel_message}")
+        else:
+            print(f"⚠️  {name}：没有 PolicyIntel 同步记录")
+
         print(f"💾 写入数据库: {result.get('write_count', 0)} 条")
 
         errors = []
@@ -487,6 +505,20 @@ class CrawlerManager:
             print(f"[RUN RECORD ERROR] {run_record_result.get('message', 'unknown error')}")
         elif run_record_result.get("status") == "skipped":
             print(f"[RUN RECORD SKIP] {run_record_result.get('message', '')}")
+
+        policyintel_run_result = (
+            run_record_result.get("policyintel_result") or {}
+        )
+        if policyintel_run_result.get("status") == "error":
+            print(
+                "[POLICYINTEL RUN RECORD ERROR] "
+                f"{policyintel_run_result.get('message', 'unknown error')}"
+            )
+        elif policyintel_run_result.get("status") == "skipped":
+            print(
+                "[POLICYINTEL RUN RECORD SKIP] "
+                f"{policyintel_run_result.get('message', '')}"
+            )
 
         if self.verbose_crawler_log and crawler_output.strip():
             print("🧾 原始爬虫日志：")
@@ -559,6 +591,7 @@ class CrawlerManager:
                         result,
                         crawler_output,
                         captured_storage_result,
+                        captured_policyintel_result,
                     ) = self._run_crawler_in_subprocess(
                         crawler_func
                     )
@@ -575,11 +608,28 @@ class CrawlerManager:
                         )
                     ):
                         adapted_result["storage_result"] = captured_storage_result
+                    current_policyintel_result = (
+                        adapted_result.get("policyintel_result") or {}
+                    )
+                    if captured_policyintel_result and (
+                        current_policyintel_result.get("status")
+                        in {None, "unknown"}
+                        or (
+                            current_policyintel_result.get("status")
+                            in {"success", "partial"}
+                            and current_policyintel_result.get("counts_verified")
+                            is not True
+                        )
+                    ):
+                        adapted_result["policyintel_result"] = (
+                            captured_policyintel_result
+                        )
                     data_list = adapted_result["items"]
                     metrics = adapted_result["metrics"]
                     latest_items = adapted_result.get("latest_items") or []
                     storage_result = adapted_result.get("storage_result") or {}
                     api_push_result = adapted_result.get("api_push_result")
+                    policyintel_result = adapted_result.get("policyintel_result")
 
                     global_duplicate_count = 0
                     with policy_keys_lock:
@@ -610,6 +660,7 @@ class CrawlerManager:
                         'crawler_file': crawler_file,
                         'storage_result': storage_result,
                         'api_push_result': api_push_result,
+                        'policyintel_result': policyintel_result,
                         'raw_log_line_count': len(crawler_output.splitlines()),
                     }
 
@@ -656,6 +707,7 @@ class CrawlerManager:
                             'duplicate_policy_count': 0,
                             'saved_count': 0,
                             'api_push_failed_count': 0,
+                            'policyintel_sync_failed_count': 0,
                             'errors': [str(e)],
                         },
                         'execution_time': round(execution_time, 2),
@@ -747,6 +799,24 @@ class CrawlerManager:
 
         print(f"[METRICS] 原始条目: {total_raw} 条，有效条目: {total_valid} 条，重复政策: {total_duplicate} 条，正文为空: {total_empty_content} 条")
         print(f"[HEALTH] 健康状态: {health_summary}")
+        policyintel_run_status_counts = {}
+        for result in self.results.values():
+            run_record_result = result.get("run_record_result") or {}
+            policyintel_run_result = (
+                run_record_result.get("policyintel_result") or {}
+            )
+            status = policyintel_run_result.get("status", "unknown")
+            policyintel_run_status_counts[status] = (
+                policyintel_run_status_counts.get(status, 0) + 1
+            )
+        policyintel_run_summary = ", ".join(
+            f"{key}={value}"
+            for key, value in sorted(policyintel_run_status_counts.items())
+        )
+        print(
+            "[POLICYINTEL RUN RECORDS] 运行记录同步: "
+            f"{policyintel_run_summary or '无记录'}"
+        )
 
         # 获取完整日志
         full_log = dual_out.getvalue() + dual_err.getvalue()
